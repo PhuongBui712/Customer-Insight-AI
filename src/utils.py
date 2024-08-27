@@ -1,9 +1,9 @@
 import os
 import yaml
 import json
-import time
-from datetime import datetime
-
+import pytz
+from datetime import datetime, timedelta
+from typing import Optional, Literal, List, Tuple
 
 NUM_THREADS = os.cpu_count() 
 
@@ -27,8 +27,42 @@ def save_json(path: str, content: dict, indent: int = 4) -> None:
         json.dump(content, file, indent=indent)
 
 
-def string_to_unix_second(s: str, format: str = "%Y-%m-%dT%H:%M:%S") -> int:
-    dt = datetime.strptime(s, format=format)
+def string_to_unix_second(s: str,
+                          format: str = "%Y-%m-%dT%H:%M:%S",
+                          tz: str = 'UTC',
+                          return_tz: str = 'Asia/Bangkok') -> int:
+    added_second = 0
+    try:
+        rounded_s = s.split('.')[0]
+        added_second = 1 if int(s.split('.')[1]) >= 0.5 else 0
+    except Exception:
+        rounded_s = s
+
+    # convert to `datetime`
+    dt = datetime.strptime(rounded_s, format=format)
+    tz = pytz.timezone(tz)
+    dt = tz.localize(dt)
+
+    if return_tz:
+        tz = pytz.timezone(return_tz)
+        dt = dt.astimezone(tz)
+
     timestamp = int(dt.timestamp())
 
-    return timestamp
+    return timestamp + added_second
+
+
+def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 'timestamp'):
+    now = datetime.now()
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    result = start_of_day - timedelta(days=num_days)
+    if return_type == 'timestamp':
+        result = int(result.timestamp)
+
+    return result
+
+
+def split_time_stamp(since: int, until: int, time_delta: int = 30*24*60*60) -> List[Tuple[int, int]]:
+    result = [(t, min(t + time_delta, until)) for t in range(since, until, time_delta)]
+    return result
