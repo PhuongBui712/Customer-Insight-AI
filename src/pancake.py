@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+from tenacity import retry, stop_after_attempt, wait_exponential
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Literal, Any, Union, List
@@ -8,6 +9,10 @@ from typing import Optional, Literal, Any, Union, List
 from utils import *
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=60)
+)
 def call_pancake_api(
     url: str,
     parameters: Optional[dict] = None,
@@ -41,7 +46,10 @@ def call_pancake_api(
     else:
         raise ValueError(f"Unsupported call_type: {call_type}")
 
+    # check request status
     response.raise_for_status()
+
+    # check status from response
 
     # Process the response based on return_type
     if return_type == 'raw':
@@ -52,7 +60,7 @@ def call_pancake_api(
         return json.loads(response.content)
     else:
         raise ValueError(f"Unsupported return_type: {return_type}")
-    
+
 
 def get_page(return_type: Literal['id', 'full'] = 'full') -> dict:
     request_page_list_url = 'https://pages.fm/api/v1/pages'
@@ -100,26 +108,40 @@ def get_page_conversations(page_id: str,
                            page_access_token: str,
                            since: int,
                            until: int,
-                           page_number: int = 1,
                            order_by: Literal['insert', 'update'] = 'update',
                            filter: List[str] = ['inbox', 'comment', 'rating']):
-    response = call_pancake_api(
-        url=f'https://pages.fm/api/public_api/v1/pages/{page_id}/conversations',
-        parameters={'page_access_token': page_access_token,
-                    'since': since,
-                    'until': until,
-                    'page_id': page_id,
-                    'page_number': page_number},
-        return_type='dictionary',
-        add_access_token=False
-    )
+    # split the timestamp in case of the time range is longer than 1 month
+    timestamp_list = split_time_stamp(since, until)
     
-    result = None
-    if not response['success']:
-        print('UserWarning: Failed to get conversations for page {}.'.format(page_id))
-    else:
-        result = [c for c in response['conversations'] if c['type'].lower() in filter]
+    # loop over each time range
+    result = []
+    for s, u in timestamp_list:
+        # in each time range, go through all pages of response
+        page_number = 1
+        while True:
+            response = call_pancake_api(
+                url=f'https://pages.fm/api/public_api/v1/pages/{page_id}/conversations',
+                parameters={'page_access_token': page_access_token,
+                            'since': s,
+                            'until': u,
+                            'page_id': page_id,
+                            'page_number': page_number,
+                            'order_by': 'updated_at' if order_by == 'update' else 'inserted_at'},
+                return_type='dictionary',
+                add_access_token=False
+            )
+
+            if not response['success']:
+                print(f"UserWarning: Failed to get conversations for page {page_id}. Respone's message: {response['message']}")
+                break
+            elif len(response['conversations']) == 0:
+                break
+            
+            # update result
+            result += response['conversations']
+
+            # update `page_number`
+            page_number += 1
     
+    result = [c for c in result if c['type'].lower() in filter]
     return result
-
-
