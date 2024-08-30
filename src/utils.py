@@ -5,7 +5,7 @@ import pytz
 from datetime import datetime, timedelta
 from typing import Optional, Literal, List, Tuple
 
-NUM_THREADS = os.cpu_count() 
+NUM_WORKERS = os.cpu_count() 
 
 
 def load_yaml_file(path: str) -> dict:
@@ -52,8 +52,10 @@ def string_to_unix_second(s: str,
     return timestamp + added_second
 
 
-def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 'timestamp'):
+def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 'timestamp', timezone: str = 'Asisa/Bangkok'):
     now = datetime.now()
+    tz = pytz.timezone(timezone)
+    now = tz.localize(now)
     start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     result = start_of_day - timedelta(days=num_days)

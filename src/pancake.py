@@ -49,8 +49,6 @@ def call_pancake_api(
     # check request status
     response.raise_for_status()
 
-    # check status from response
-
     # Process the response based on return_type
     if return_type == 'raw':
         return response.content
@@ -62,18 +60,26 @@ def call_pancake_api(
         raise ValueError(f"Unsupported return_type: {return_type}")
 
 
-def get_page(return_type: Literal['id', 'full'] = 'full') -> dict:
+def get_page(return_type: Literal['id', 'standard', 'full'] = 'standard') -> Union[dict, list]:
     request_page_list_url = 'https://pages.fm/api/v1/pages'
     response = call_pancake_api(url=request_page_list_url,
                                 return_type='dictionary')
+    if not response['success']:
+        raise Exception('Failed to get pages data from Pancake API.')
+
     pages = response['categorized']
 
     if return_type == 'full':
         return {page['id']: page for page in pages['activated']}
+
+    elif return_type == 'standard':
+        return{page['id']: {'name': page['name'], 'page_access_token': page['settings'].get('page_access_token', None)} 
+               for page in pages['activated']}
+
     return pages['activated_page_id']
 
 
-def get_page_access_token(page_info: dict, config: Optional[dict] = None) -> tuple[dict[str, str], list[str]]:
+def get_page_access(page_info: dict, config: Optional[dict] = None) -> tuple[dict[str, str], list[str]]:
     if config is not None and config['excluded_page']:
         page_ids = list(page_info.keys())
         excluded_ids = [id for id, info in page_info.items() if info['name'] in config['excluded_page']]
@@ -145,3 +151,83 @@ def get_page_conversations(page_id: str,
     
     result = [c for c in result if c['type'].lower() in filter]
     return result
+
+
+def get_sender(sender_dict: dict, is_sender_patterns: Optional[list] = None) -> Literal['customer', 'admin']:
+    if 'admin_id' in sender_dict:
+        return 'admin'
+
+    admin_patterns = ['Trường Bào Ngư'] + (is_sender_patterns or [])
+    for pattern in admin_patterns:
+        if re.search(pattern, sender_dict['name']):
+            return 'admin'
+
+    return 'customer'
+
+
+def filter_message(message_response: dict, attrs: Optional[list] = None) -> dict:
+    if not message_response['original_message']:
+        return None
+    
+    result = {}
+    # message
+    result['message'] = message_response['original_message']
+    # time
+    result['inserted_at'] = message_response['inserted_at']
+    # from
+    result['from'] = get_sender(message_response['from'])
+    
+    # additional attributes
+    if attrs is not None:
+        for k in attrs:
+            result[k] = message_response.get(k, None)
+         
+    return result
+
+
+def get_messages(page_id: str,
+                 page_access_token: str,
+                 conversation_id: str,
+                 customer_id: str,
+                 since: int,
+                 until: int):
+    # Get messages
+    message_cnt = 0
+    update_timestamp = None
+    messages = []
+    while update_timestamp is None or update_timestamp > since:
+        # call API
+        response = call_pancake_api(
+            url=f'https://pages.fm/api/public_api/v1/pages/{page_id}/conversations/{conversation_id}/messages',
+            parameters={
+                'current_count': message_cnt,
+                'page_access_token': page_access_token,
+                'customer_id': customer_id,
+                'conversation_id': conversation_id,
+                'page_id': page_id
+            },
+            return_type='dictionary',
+            add_access_token=False
+        )
+
+        # check response status
+        if not response['success']:
+            print(f"UserWarning: Failed to get conversations for page {page_id}. Respone's message: {response['message']}")
+
+        # check messages
+        if len(response['messages']) == 0:
+            break
+
+        # store messages
+        messages = response['messages'] + messages
+
+        # update `update_timstamp` and `message_cnt`
+        update_timestamp = string_to_unix_second(response['messages'][0]['inserted_at'])
+        message_cnt += len(response['messages'])
+
+    # filter messages
+    messages = [filter_message(m) for m in messages \
+                if since <= string_to_unix_second(m['inserted_at']) <= until]
+    messages = [m for m in messages if m]
+    
+    return messages
