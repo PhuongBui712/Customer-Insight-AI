@@ -7,6 +7,7 @@ from typing import Optional, Literal, List, Tuple
 
 
 NUM_WORKERS = min(os.cpu_count() - 1, max(7, os.cpu_count() // 2))
+PROJECT_DIRECTORY = os.path.join(os.path.dirname(__file__), '..')
 
 
 def load_yaml(path: str) -> dict:
