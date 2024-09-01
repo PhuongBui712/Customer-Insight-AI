@@ -5,17 +5,18 @@ import pytz
 from datetime import datetime, timedelta
 from typing import Optional, Literal, List, Tuple
 
-NUM_WORKERS = os.cpu_count() 
+
+NUM_WORKERS = min(os.cpu_count() - 1, max(7, os.cpu_count() // 2))
 
 
-def load_yaml_file(path: str) -> dict:
+def load_yaml(path: str) -> dict:
     with open(path, 'r') as file:
         res = yaml.safe_load(file)
 
     return res
 
 
-def read_json(path: str) -> dict:
+def load_json(path: str) -> dict:
     with open(path, 'r', encoding='utf-8') as file:
         result = json.load(file)
 
@@ -24,7 +25,7 @@ def read_json(path: str) -> dict:
 
 def save_json(path: str, content: dict, indent: int = 4) -> None:
     with open(path, 'w', encoding='utf-8') as file:
-        json.dump(content, file, indent=indent)
+        json.dump(content, file, indent=indent, ensure_ascii=False)
 
 
 def string_to_unix_second(s: str,
@@ -39,7 +40,7 @@ def string_to_unix_second(s: str,
         rounded_s = s
 
     # convert to `datetime`
-    dt = datetime.strptime(rounded_s, format=format)
+    dt = datetime.strptime(rounded_s, format)
     tz = pytz.timezone(tz)
     dt = tz.localize(dt)
 
@@ -52,7 +53,7 @@ def string_to_unix_second(s: str,
     return timestamp + added_second
 
 
-def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 'timestamp', timezone: str = 'Asisa/Bangkok'):
+def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 'timestamp', timezone: str = 'Asia/Bangkok'):
     now = datetime.now()
     tz = pytz.timezone(timezone)
     now = tz.localize(now)
@@ -60,7 +61,7 @@ def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 't
 
     result = start_of_day - timedelta(days=num_days)
     if return_type == 'timestamp':
-        result = int(result.timestamp)
+        result = int(result.timestamp())
 
     return result
 
