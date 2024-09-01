@@ -1,7 +1,9 @@
 import os
+import re
 import json
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
+from tqdm import tqdm
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Literal, Any, Union, List
@@ -79,11 +81,8 @@ def get_page(return_type: Literal['id', 'standard', 'full'] = 'standard') -> Uni
     return pages['activated_page_id']
 
 
-def get_page_access(page_info: dict, config: Optional[dict] = None) -> tuple[dict[str, str], list[str]]:
-    if config is not None and config['excluded_page']:
-        page_ids = list(page_info.keys())
-        excluded_ids = [id for id, info in page_info.items() if info['name'] in config['excluded_page']]
-        page_ids = list(set(page_ids) - set(excluded_ids))
+def get_page_access_token(page_info: dict) -> tuple[dict[str, str], list[str]]:
+    page_ids = list(page_info.keys())
 
     # generate page's access token
     request_page_access_token = (
@@ -93,7 +92,7 @@ def get_page_access(page_info: dict, config: Optional[dict] = None) -> tuple[dic
     )
     page_access_tokens = {}
     not_accessible_page_ids = []
-    with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         future_to_access_token = {executor.submit(request_page_access_token, id) : id for id in page_ids}
         
         for future in concurrent.futures.as_completed(future_to_access_token):
