@@ -95,7 +95,7 @@ def get_page_access_token(page_info: dict) -> tuple[dict[str, str], list[str]]:
     with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         future_to_access_token = {executor.submit(request_page_access_token, id) : id for id in page_ids}
         
-        for future in concurrent.futures.as_completed(future_to_access_token):
+        for future in tqdm(concurrent.futures.as_completed(future_to_access_token), total=len(future_to_access_token), desc='Generate page access tokens'):
             page_id = future_to_access_token[future]
             response = future.result()
             

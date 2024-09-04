@@ -3,7 +3,7 @@ import yaml
 import json
 import pytz
 from datetime import datetime, timedelta
-from typing import Optional, Literal, List, Tuple
+from typing import Optional, Literal, List, Tuple, Union
 
 
 NUM_WORKERS = min(os.cpu_count() - 1, max(7, os.cpu_count() // 2))
@@ -24,7 +24,7 @@ def load_json(path: str) -> dict:
     return result
 
 
-def save_json(path: str, content: dict, indent: int = 4) -> None:
+def save_json(path: str, content: Union[dict, list], indent: int = 4) -> None:
     with open(path, 'w', encoding='utf-8') as file:
         json.dump(content, file, indent=indent, ensure_ascii=False)
 
