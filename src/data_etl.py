@@ -8,6 +8,7 @@ from typing import List, Dict
 
 from pancake import *
 from llm import *
+from google_sheet import *
 from utils import *
 
 
@@ -213,16 +214,22 @@ if __name__ == '__main__':
     save_json(total_message_path, total_messages)
 
     # 3. analyse messages
+    # load messages needed to analyse
     message_table_path = os.path.join(PROJECT_DIRECTORY, config['message-table'])
     if not os.path.exists(message_table_path):
         messages = total_messages
 
+    # analysing
     customer_messages = [m for m in messages if m['from'] == 'customer']
     message_list = [m['message'] for m in customer_messages]
     important_mask = classify_inquiry_pipeline(message_list)
-    important_messages = [m for i, m in zip(important_mask, customer_messages) if i]
 
-    # update inquiry tables
+    # handle failed cases
+    error_messages = [m for i, m in zip(important_mask, customer_messages) if i == 'error']
+    save_json(os.path.join(PROJECT_DIRECTORY, config['error-messages']))
+
+    # handle success cases
+    important_messages = [m for i, m in zip(important_mask, customer_messages) if i == True]
     important_message_df = create_dataframe(important_messages)
     inquiry_path = os.path.join(PROJECT_DIRECTORY, config['insight-inquiry-table'])
     important_message_df.to_csv(inquiry_path, index=False)
