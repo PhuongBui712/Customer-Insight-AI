@@ -170,7 +170,7 @@ def data_etl(schema_path: str, filter_patterns: Optional[List] = None):
     return messages
 
 
-# ---------------------  ---------------------
+# --------------------- ETL Utilities ---------------------
 def create_dataframe(messages: List[dict]) -> DataFrame:
     df = pd.DataFrame(data=messages)
 
@@ -208,14 +208,16 @@ if __name__ == '__main__':
     # store messages lists
     total_message_path = os.path.join(PROJECT_DIRECTORY, config['total-messages'])
     if os.path.exists(total_message_path):
-        messages = load_json(total_message_path) + messages
+        total_messages = load_json(total_message_path) + messages
 
-    save_json(total_message_path, messages)
+    save_json(total_message_path, total_messages)
 
     # 3. analyse messages
-    customer_messages = [m for m in messages if m['from'] == 'customer']
-    # customer_messages = customer_messages[:N]
+    message_table_path = os.path.join(PROJECT_DIRECTORY, config['message-table'])
+    if not os.path.exists(message_table_path):
+        messages = total_messages
 
+    customer_messages = [m for m in messages if m['from'] == 'customer']
     message_list = [m['message'] for m in customer_messages]
     important_mask = classify_inquiry_pipeline(message_list)
     important_messages = [m for i, m in zip(important_mask, customer_messages) if i]
