@@ -2,7 +2,7 @@ import os
 import yaml
 import json
 import pytz
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, List, Tuple, Union
 
 
@@ -54,10 +54,21 @@ def string_to_unix_second(s: str,
     return timestamp + added_second
 
 
-def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 'timestamp', timezone: str = 'Asia/Bangkok'):
-    now = datetime.now()
-    tz = pytz.timezone(timezone)
-    now = tz.localize(now)
+def get_current_time_utc_plus_7():
+    # Define UTC+7 timezone
+    utc_plus_7 = timezone(timedelta(hours=7))
+    
+    # Get the current time in UTC+7
+    current_time_utc_plus_7 = datetime.now(utc_plus_7)
+    
+    # Remove microseconds and timezone information
+    current_time_utc_plus_7 = current_time_utc_plus_7.replace(microsecond=0, tzinfo=None)
+    
+    return current_time_utc_plus_7   
+
+
+def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 'timestamp'):
+    now = get_current_time_utc_plus_7()
     start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     result = start_of_day - timedelta(days=num_days)
@@ -69,4 +80,4 @@ def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 't
 
 def split_time_stamp(since: int, until: int, time_delta: int = 30*24*60*60) -> List[Tuple[int, int]]:
     result = [(t, min(t + time_delta, until)) for t in range(since, until, time_delta)]
-    return result
+    return result 
