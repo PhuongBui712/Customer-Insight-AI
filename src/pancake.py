@@ -154,12 +154,12 @@ def get_page_conversations(page_id: str,
 
 def get_sender(sender_dict: dict, is_sender_patterns: Optional[list] = None) -> Literal['customer', 'admin']:
     if 'admin_id' in sender_dict:
-        return 'staff'
+        return 'admin'
 
     admin_patterns = ['Trường Bào Ngư'] + (is_sender_patterns or [])
     for pattern in admin_patterns:
         if re.search(pattern, sender_dict['name']):
-            return 'staff'
+            return 'admin'
 
     return 'customer'
 
