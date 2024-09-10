@@ -98,44 +98,60 @@ Lưu ý:
 - Hãy cố gắng trích xuất thông tin chính xác nhất có thể từ tin nhắn của khách hàng.
 - Đôi khi, một tin nhắn có thể chứa nhiều đối tượng hoặc mục đích sử dụng.
 
+Quy tắc phân loại:
+1. Khi xác định mục đích sử dụng, ưu tiên phân loại vào một hoặc nhiều mục trong danh sách sau: ["thăm bệnh", "biếu tặng", "tẩm bổ", "tăng sinh lực"]. \
+Nếu mục đích tương tự hoặc liên quan đến một trong các mục này, hãy sử dụng thuật ngữ trong danh sách. Ví dụ:
+   - "ăn" tương tự với "tẩm bổ"
+   - "thăm ốm" tương đương với "thăm bệnh"
+2. Khi xác định đối tượng sử dụng, ưu tiên phân loại vào một hoặc nhiều mục trong danh sách sau: ["ba/mẹ", "vợ/chồng", "trẻ con", "người già", "mẹ bầu", "người bệnh"]. Nếu đối tượng tương tự hoặc thuộc một trong các mục này, hãy sử dụng thuật ngữ trong danh sách. Ví dụ:
+   - "người ốm" tương tự với "người bệnh"
+   - "con cái" thuộc nhóm "con cái"
+3. Nếu mục đích hoặc đối tượng được trích xuất hoàn toàn khác với các mục trong danh sách, hãy giữ nguyên và trả về như vậy.
+
 Ví dụ:
 Input: ["Mua cho người nhà bị bệnh ăn", "bồi bổ ăn cái nào ạ", "Mẹ Bầu ăn có tốt không?", "Mua để tặng đối tác và ba mẹ", "Kh phải người lớn tuổi", \
 "Đặt Súp Bào Ngư thăm người Ốm!", "Đặt Súp Bào Ngư tăng sinh lực Vợ / Chồng"]
 Output: [
   {{
     "Mua cho người nhà bị bệnh ăn": {{
-      "user": ["người nhà", "người bệnh"],
-      "purpose": ["bồi dưỡng bệnh"]
+      "user": ["người bệnh"],
+      "purpose": ["tẩm bổ", "thăm bệnh"]
     }}
   }},
   {{
     "bồi bổ ăn cái nào ạ": {{
       "user": [],
-      "purpose": ["bồi bổ"]
+      "purpose": ["tẩm bổ"]
     }}
   }},
   {{
     "Mẹ Bầu ăn có tốt không?": {{
       "user": ["mẹ bầu"],
-      "purpose": ["bồi bổ"]
+      "purpose": ["tẩm bổ"]
     }}
   }},
   {{
-    "Mua để tặng đối tác và ba mẹ": {{
-      "user": ["đối tác", "ba mẹ"],
-      "purpose": ["biếu tặng"]
-    }}
-  }},
-  {{
-    "Kh phải người lớn tuổi": {{
+    "E mua ăn thui á": {{
       "user": [],
-      "purpose": []
+      "purpose": ["tẩm bổ"]
+    }}
+  }},
+  {{
+    "Em mua cho ck em ăn ạ": {{
+      "user": ["vợ/chồng"],
+      "purpose": ["tẩm bổ"]
+    }}
+  }},
+    {{
+    "Vk e bị mới mổ xong nên mua tẩm bổ ạ": {{
+      "user": ["vợ/chồng", "người bệnh"],
+      "purpose": ["tẩm bổ"]
     }}
   }},
   {{
     "Đặt Súp Bào Ngư thăm người Ốm!": {{
       "user": ["người bệnh"],
-      "purpose": ["bồi dưỡng bệnh"]
+      "purpose": ["thăm bệnh"]
     }}
   }},
   {{

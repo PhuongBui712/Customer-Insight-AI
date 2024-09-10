@@ -157,8 +157,9 @@ def handle_template_message(templates: Dict[str, Dict[str, str]], messages: List
     template_message = []
     other_message = []
     for m in messages:
-        if m['message'] in templates:
-            m.update(templates[m['message']])
+        key = m['message'].lower()
+        if key in templates:
+            m.update(templates[key])
             template_message.append(m)
         else:
             other_message.append(m)
@@ -166,8 +167,9 @@ def handle_template_message(templates: Dict[str, Dict[str, str]], messages: List
     return template_message, other_message
 
 
-def classify_inquiry_pipeline(messages: List[dict], 
-                              batch_size: int = 50, 
+def classify_inquiry_pipeline(messages: List[dict],
+                              min_score: float,
+                              batch_size: int = 50,
                               provider: Literal['google', 'groq'] = 'groq') -> Tuple[List[dict], List[dict]]:
     # classify by LLM
     if provider == 'google':
@@ -195,7 +197,7 @@ def classify_inquiry_pipeline(messages: List[dict],
             mask += ['error' for _ in range(i, end_idx)]
     
     # get output to return
-    classified_messages = [m for m, l in zip(messages, mask) if l == True]
+    classified_messages = [m for m, l in zip(messages, mask) if l >= min_score]
     error_messages = [m for m, l in zip(messages, mask) if l == 'error']
 
     return classified_messages, error_messages
@@ -232,19 +234,20 @@ def extract_keyword_pipeline(messages: List,
     error_messages = []
     for mess, kw_item in zip(messages, keywords):
         if kw_item != 'error':
-            extracted_messages.append(mess.copy())
             k, v = list(kw_item.items())[0]
-            print(k, v)
-            extracted_messages[-1].update(v)
+            if all(len(x) > 0 for x in v.values()):
+                extracted_messages.append(mess.copy())
+                extracted_messages[-1].update(v)
         else:
             error_messages.append(mess.copy())
 
     return extracted_messages, error_messages
 
 
-def analyse_message_pipeline(messages: List[dict], 
+def analyse_message_pipeline(messages: List[dict],
                              filter_patterns: Optional[List[str]] = None, 
-                             template_messages: Optional[dict] = None, 
+                             template_messages: Optional[dict] = None,
+                             important_score: Optional[float] = 0.7,
                              batch_size: int = 50,
                              provider: Literal['google', 'groq'] = 'groq'):
     # Initialize results
@@ -257,13 +260,13 @@ def analyse_message_pipeline(messages: List[dict],
 
     if template_messages is not None:
         template, messages = handle_template_message(template_messages, messages)
-        processed_messages.append(template)
+        processed_messages += template
 
-    messages, error = classify_inquiry_pipeline(messages, batch_size, provider)
+    messages, error = classify_inquiry_pipeline(messages, important_score, batch_size, provider)
     error_messages += error
 
     messages, error = extract_keyword_pipeline(messages, batch_size, provider)
     error_messages += error
-    processed_messages = messages
+    processed_messages += messages
 
     return processed_messages, error_messages
