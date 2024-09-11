@@ -7,12 +7,12 @@ from tqdm import tqdm
 from typing import List, Dict
 
 from pancake import *
-from llm import *
-from google_sheet import *
+from data_analysing import *
+from data_presentation import *
 from utils import *
 
 
-# --------------------- ETL Subprocess---------------------
+# --------------------- Crawling Messages sub-processes ---------------------
 def filter_pages(name: str, patterns: List):
     for p in patterns:
         if re.search(p, name):
@@ -152,9 +152,8 @@ def update_messages(conversations: dict, new_check: int):
     return messages
 
 
-
-# --------------------- ETL Main process ---------------------
-def data_etl(schema_path: str, filter_patterns: Optional[List] = None):
+# --------------------- Get Messages main process ---------------------
+def pancake_etl(schema_path: str, filter_patterns: Optional[List] = None):
     # 1. Update pages
     page_schema = update_page(schema_path, filter_patterns)
 
@@ -172,19 +171,14 @@ def data_etl(schema_path: str, filter_patterns: Optional[List] = None):
 
 
 # --------------------- ETL Utilities ---------------------
-def create_dataframe(messages: List[dict]) -> DataFrame:
-    df = pd.DataFrame(data=messages)
+def post_process_messages(messages: Dict[str, List[dict]]):
+    result = {}
+    for con_id, mess_list in messages.items():
+        result[con_id] = {}
+        result[con_id]['conversation'] = [f'{m['from']}: {m['message']}' for m in mess_list]
+        result[con_id]['update'] = string_to_unix_second(mess_list[-1]['updated_at'])
 
-    # convert string to datetime
-    df['inserted_at'] = df['inserted_at'].str.replace('T', ' ')
-    df['inserted_at'] = df['inserted_at'].str.replace(r'\.\d{6}', '', regex=True)
-    df['inserted_at'] = pd.to_datetime(df['inserted_at'], format='%Y-%m-%d %H:%M:%S')
-    
-    # transform timezone
-    df['inserted_at'] = df['inserted_at'].dt.tz_localize('UTC')
-    df['inserted_at'] = df['inserted_at'].dt.tz_convert('Asia/Bangkok')
-
-    return df
+    return result
 
 
 def setup_data_directory(root_dir: str, sub_dir_list: List[str]) -> None:
@@ -192,75 +186,117 @@ def setup_data_directory(root_dir: str, sub_dir_list: List[str]) -> None:
         os.makedirs(os.path.join(root_dir, dir), exist_ok=True)
 
 
-if __name__ == '__main__':
-    # 1. setup directory for etl pipeline
-    config = load_yaml(os.path.join(
-        PROJECT_DIRECTORY, 'config.yaml'
-    ))
+# --------------------- ETL tasks ---------------------
+# task: remove old data at beginning of a day
+def remove_old_data(table_path: str, num_days_before: int):
+    # check data has been collected
+    if not os.path.exists(table_path):
+        return
+    
+    # just remove data once per day
+    now = get_current_time_utc_plus_7()
+    if now.hour != 0 and now.minute > 30:
+        return
+    
+    # remove
+    message_df = load_worksheet(0)
+    date_bound = get_day_before(num_days_before, return_type='date')
+    message_df = message_df.loc[message_df['inserted_at'] > date_bound]
 
-    setup_data_directory(PROJECT_DIRECTORY,
-                         sub_dir_list=[config['data-directory']])
+    # udpate worksheet
+    update_worksheet(message_df, sheet_idx=0)
 
-    # 2. start getting data
+    # update local sheet
+    message_df.to_csv(table_path, index=False)
+
+
+# task 2: update new data (pages, conversations, messages)
+def update_new_data(config: dict):
     schema = os.path.join(PROJECT_DIRECTORY, config['schema'])
     filter_patterns = config['filter-page-keywords']
-    messages = data_etl(schema, filter_patterns)
+    messages = pancake_etl(schema, filter_patterns)
 
     # store messages lists
-    total_message_path = os.path.join(PROJECT_DIRECTORY, config['total-messages'])
+    total_message_path = os.path.join(PROJECT_DIRECTORY, config['total-message'])
     if os.path.exists(total_message_path):
         total_messages = load_json(total_message_path) + messages
 
     save_json(total_message_path, total_messages)
 
-    # 3. analyse messages
+    return messages, total_messages
+
+
+# task 3: load data to be analysed
+def load_analyse_data(config: dict, messages: List[str], total_messages: List[str]):
     # load messages needed to analyse
     message_table_path = os.path.join(PROJECT_DIRECTORY, config['message-table'])
+    error_path = os.path.join(PROJECT_DIRECTORY, config['error-message'])
+
+    # load total messages if not analysing yet
     if not os.path.exists(message_table_path):
-        messages = total_messages
+        messages = [m for m in total_messages if m['from'] == 'customer']
 
-    # analysing
-    customer_messages = [m for m in messages if m['from'] == 'customer']
-    message_list = [m['message'] for m in customer_messages]
-    important_mask = classify_inquiry_pipeline(message_list)
+    # load error messages if exist
+    if os.path.exists(error_path):
+        messages += load_json(error_path)
 
-    # handle failed cases
-    error_messages = [m for i, m in zip(important_mask, customer_messages) if i == 'error']
-    save_json(os.path.join(PROJECT_DIRECTORY, config['error-messages']))
+    return 
 
-    # handle success cases
-    important_messages = [m for i, m in zip(important_mask, customer_messages) if i == True]
-    important_message_df = create_dataframe(important_messages)
-    inquiry_path = os.path.join(PROJECT_DIRECTORY, config['insight-inquiry-table'])
-    important_message_df.to_csv(inquiry_path, index=False)
 
-    # 3.1 Extracting keywords
-    # # adding retry messages
-    # retry_keyword_path = os.path.join(PROJECT_DIRECTORY, config['keyword-retry'])
-    # if os.path.exists(retry_keyword_path):
-    #     customer_messages += load_json(retry_keyword_path)
+# task 6: update tables
+def update_table(config: dict, processed_messages: List[dict], error_messages: Optional[List[dict]]):
+    # update message df
+    message_sheet_idx = config['google-sheet']['message-sheet-iddx']
+    last_message_df = load_worksheet(message_sheet_idx)
+    new_message_df = create_dataframe(processed_messages)
+    updated_message_df = pd.concat([last_message_df, new_message_df], axis=0)
 
-    # # extracting keywords
-    # message_list = [m['message'] for m in customer_messages]
-    # keywords_list = keyword_extract_pipeline(message_list)
+    update_worksheet(updated_message_df, message_sheet_idx, mode='replace')
+    updated_message_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['message-table']), index=False)
+
+    # update 2 stats sheet
+    user_sheet_idx = config['google-sheet']['user-sheet-idx']
+    purpose_sheet_idx = config['google-sheet']['purpose-sheet-idx']
+    user_df, purpose_df = analyse_data(updated_message_df)
+
+    update_worksheet(user_df, user_sheet_idx, mode='replace')
+    user_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['user-table']))
+    update_worksheet(purpose_df, purpose_sheet_idx, mode='replace')
+    purpose_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['purpose-table']))
+
+    # store failed messages
+    if error_messages:
+        save_json(os.path.join(PROJECT_DIRECTORY, config['error-message']))
     
-    # # retry_keywords = []
-    # for keywords, message in zip(keywords_list, customer_messages):
-    #         message['keywords'] = keywords
-    # customer_messages = [m for m in customer_messages if m.get('keywords', None)]
 
-    # # save retry keywords
-    # # save_json(retry_keyword_path, retry_keywords)
-    
-    # # convert to table
-    # keywords_df = pd.DataFrame(data=customer_messages)
-    
-    # # update table
-    # keywords_path = os.path.join(PROJECT_DIRECTORY, config['keyword-table'])
-    # if os.path.exists(keywords_path):
-    #     past_keyword_df = pd.read_csv(keywords_path)
-    #     keywords_df = pd.concat([keywords_df, past_keyword_df], axis=0)
-    
-    # keywords_df.to_csv(keywords_path, index=False)
+# if __name__ == '__main__':
+def analyse_customer_message_pipeline():
+    # 1. setup directory for etl pipeline
+    config = load_yaml(os.path.join(
+        PROJECT_DIRECTORY, 'config.yaml'
+    ))
 
+    setup_data_directory(
+        PROJECT_DIRECTORY,
+        sub_dir_list=[config['data-directory']]
+    )
 
+    # 2. Check new day & delete old data
+    remove_old_data(table_path=os.path.join(PROJECT_DIRECTORY, config['message-table']), num_days_before=90)
+    
+    # 3. get new messages
+    messages, total_messages = update_new_data(config)
+
+    # 4. load analyse messages
+    messages = load_analyse_data(config, messages, total_messages)
+
+    # 5. analysing
+    processed_messages, error_messages = analyse_message_pipeline(
+        messages,
+        filter_patterns=config['filter-message-keywords'],
+        template_messages=config['template-message'],
+        important_score=config['important-score']
+    )
+
+    # 6. update tables
+    update_table(config, processed_messages, error_messages)
