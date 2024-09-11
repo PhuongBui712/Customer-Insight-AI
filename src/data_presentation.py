@@ -4,7 +4,7 @@ from google.oauth2.service_account import Credentials
 
 import pandas as pd
 from pandas import DataFrame
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
 from dotenv import load_dotenv
 
@@ -49,6 +49,58 @@ def update_worksheet(dataframe: DataFrame, sheet_id: Optional[str] = None, sheet
         worksheet.clear()
     
     worksheet.update([dataframe.columns.values.tolist()] + dataframe.values.tolist())
+
+
+# --------------------- Specific functions ---------------------
+# These functions are specific to the data structure used in this
+# project and may not be applicable to all data.
+def create_dataframe(messages: List[dict]) -> DataFrame:
+    """
+    Creates a Pandas DataFrame from a list of messages.
+
+    This function takes a list of dictionaries representing messages, each containing the following keys:
+    - `message`: The message content.
+    - `from`: The sender of the message.
+    - `inserted_at`: The timestamp of the message insertion.
+    - `user`: The user associated with the message.
+    - `purpose`: The purpose of the message.
+
+    The function converts the list of dictionaries into a Pandas DataFrame and performs the following transformations on the 'inserted_at' column:
+
+    1. Converts the string representation of the timestamp to a datetime object.
+    2. Localizes the timestamp to UTC.
+    3. Converts the timestamp to the Asia/Bangkok timezone.
+
+    Args:
+        messages (List[dict]): A list of dictionaries representing messages.
+
+    Returns:
+        DataFrame: A Pandas DataFrame containing the messages.
+    """
+    df = pd.DataFrame(data=messages)
+
+    # convert string to datetime
+    df['inserted_at'] = df['inserted_at'].str.replace('T', ' ')
+    df['inserted_at'] = df['inserted_at'].str.replace(r'\.\d{6}', '', regex=True)
+    df['inserted_at'] = pd.to_datetime(df['inserted_at'], format='%Y-%m-%d %H:%M:%S')
+    
+    # transform timezone
+    df['inserted_at'] = df['inserted_at'].dt.tz_localize('UTC')
+    df['inserted_at'] = df['inserted_at'].dt.tz_convert('Asia/Bangkok')
+
+    return df
+
+
+def analyse_data(message_df: DataFrame, user_col: str = 'user', purpose_col: str = 'purpose') -> DataFrame:
+    user = message_df[[user_col]]
+    count_user = user.explode([user_col])
+    count_user = count_user.value_counts(user_col, ascending=False).reset_index()
+
+    purpose = message_df[[purpose_col]]
+    count_purpose = purpose.explode([purpose_col])
+    count_purpose = count_purpose.value_counts(purpose_col, ascending=False).reset_index()
+
+    return count_user, count_purpose
 
 
 if __name__ == '__main__':
