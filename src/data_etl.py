@@ -269,7 +269,7 @@ def update_table(config: dict, processed_messages: List[dict], error_messages: O
         save_json(os.path.join(PROJECT_DIRECTORY, config['error-message']))
     
 
-# if __name__ == '__main__':
+# complete ETL
 def analyse_customer_message_pipeline():
     # 1. setup directory for etl pipeline
     config = load_yaml(os.path.join(
@@ -300,3 +300,7 @@ def analyse_customer_message_pipeline():
 
     # 6. update tables
     update_table(config, processed_messages, error_messages)
+
+
+if __name__ == '__main__':
+    analyse_customer_message_pipeline()

@@ -11,7 +11,7 @@ PROJECT_DIRECTORY = os.path.join(os.path.dirname(__file__), '..')
 
 
 def load_yaml(path: str) -> dict:
-    with open(path, 'r') as file:
+    with open(path, 'r', encoding='utf-8') as file:
         res = yaml.safe_load(file)
 
     return res
