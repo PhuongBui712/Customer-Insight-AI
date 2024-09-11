@@ -218,6 +218,7 @@ def update_new_data(config: dict):
 
     # store messages lists
     total_message_path = os.path.join(PROJECT_DIRECTORY, config['total-message'])
+    total_messages = messages.copy()
     if os.path.exists(total_message_path):
         total_messages = load_json(total_message_path) + messages
 
@@ -240,7 +241,7 @@ def load_analyse_data(config: dict, messages: List[str], total_messages: List[st
     if os.path.exists(error_path):
         messages += load_json(error_path)
 
-    return 
+    return messages
 
 
 # task 6: update tables
