@@ -296,7 +296,8 @@ def analyse_customer_message_pipeline():
         messages,
         filter_patterns=config['filter-message-keywords'],
         template_messages=config['template-message'],
-        important_score=config['important-score']
+        important_score=config['important-score'],
+        provider=config['provider']
     )
 
     # 6. update tables
