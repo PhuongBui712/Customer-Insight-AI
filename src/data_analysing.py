@@ -181,7 +181,7 @@ def classify_inquiry_pipeline(messages: List[dict],
     for i in tqdm(range(0, len(messages), batch_size), desc='Detecting insightful inquiry'):
         end_idx = min(len(messages), i + batch_size)
         try:
-            response = chain.invoke({'input': str(messages[i : end_idx])})
+            response = chain.invoke({'input': str([m['message'] for m in messages[i : end_idx]])})
         except Exception:
             print(f'Error while generating response for batch {i} - {end_idx}')
             
@@ -215,7 +215,7 @@ def extract_keyword_pipeline(messages: List,
     for i in tqdm(range(0, len(messages), batch_size), desc='Extracting keywords'):
         end_idx = min(len(messages), i + batch_size)
         try:
-            response = chain.invoke({'input': str(messages[i : end_idx])})
+            response = chain.invoke({'input': str([m['message'] for m in messages[i : end_idx]])})
         
         except Exception:
             print(f'Error while generating response for batch {i} - {end_idx}')
