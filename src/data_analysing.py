@@ -4,8 +4,7 @@ import re
 from time import sleep
 from tqdm import tqdm
 from threading import Lock
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict
 from dotenv import load_dotenv
 
@@ -167,68 +166,88 @@ def handle_template_message(templates: Dict[str, Dict[str, str]], messages: List
     return template_message, other_message
 
 
-def classify_inquiry_pipeline(messages: List[dict],
-                              min_score: float,
-                              batch_size: int = 50,
-                              provider: Literal['google', 'groq'] = 'groq') -> Tuple[List[dict], List[dict]]:
+def classify_inquiry_pipeline(
+    messages: List[dict],
+    min_score: float,
+    batch_size: int = 50,
+    provider: Literal["google", "groq"] = "groq",
+) -> Tuple[List[dict], List[dict]]:
     # classify by LLM
-    if provider == 'google':
+    if provider == "google":
         chain = GoogleAICaller(LLM_CONFIG[provider], inquiry_classifying_prompt)
     else:
         chain = GroqAICaller(LLM_CONFIG[provider], inquiry_classifying_prompt)
 
     mask = []
-    for i in tqdm(range(0, len(messages), batch_size), desc='Detecting insightful inquiry'):
-        end_idx = min(len(messages), i + batch_size)
-        try:
-            response = chain.invoke({'input': str([m['message'] for m in messages[i : end_idx]])})
-        except Exception:
-            print(f'Error while generating response for batch {i} - {end_idx}')
-            
-            mask += ['error' for _ in range(i, end_idx)]
-            continue
+    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+        future = {
+            executor.submit(
+                lambda : chain.invoke({"input": str([m["message"] for m in messages[i : min(i + batch_size, len(messages))]])})
+            ): i
+            for i in range(0, len(messages), batch_size)
+        }
+        for f in tqdm(as_completed(future), total=len(future), desc="Detecting insightful inquiry"):
+            i = future[f]
+            end_idx = min(i + batch_size, len(messages))
+            try:
+                response = f.result()
+            except Exception:
+                print(f"Error while generating response for batch {i} - {end_idx}")
+                print(response)
+                mask += ["error" for _ in range(i, end_idx)]
+                continue
 
-        try:
-            parsed_response = _parse_llm_output(response)
-            mask += [list(r.items())[0][1] for r in parsed_response]
-        except Exception:
-            print(f'Error while parsing LLM output for batch {i} - {end_idx}')
+            try:
+                parsed_response = _parse_llm_output(response)
+                mask += [list(r.items())[0][1] for r in parsed_response]
+            except Exception:
+                print(f"Error while parsing LLM output for batch {i} - {end_idx}")
+                print(response)
+                mask += ["error" for _ in range(i, end_idx)]
 
-            mask += ['error' for _ in range(i, end_idx)]
-    
     # get output to return
     classified_messages = [m for m, l in zip(messages, mask) if l >= min_score]
-    error_messages = [m for m, l in zip(messages, mask) if l == 'error']
+    error_messages = [m for m, l in zip(messages, mask) if l == "error"]
 
     return classified_messages, error_messages
 
 
-def extract_keyword_pipeline(messages: List, 
-                             batch_size: int = 50, 
-                             provider: Literal['google', 'groq'] = 'groq') -> Tuple[List[dict], List[dict]]:
+def extract_keyword_pipeline(
+        messages: List, 
+        batch_size: int = 50, 
+        provider: Literal['google', 'groq'] = 'groq'
+) -> Tuple[List[dict], List[dict]]:
     if provider == 'google':
         chain = GoogleAICaller(LLM_CONFIG[provider], keyword_extracting_prompt)
     else:
         chain = GroqAICaller(LLM_CONFIG[provider], keyword_extracting_prompt)
     
     keywords = []
-    for i in tqdm(range(0, len(messages), batch_size), desc='Extracting keywords'):
-        end_idx = min(len(messages), i + batch_size)
-        try:
-            response = chain.invoke({'input': str([m['message'] for m in messages[i : end_idx]])})
-        
-        except Exception:
-            print(f'Error while generating response for batch {i} - {end_idx}')
-            keywords += ['error' for _ in range(i, end_idx)]
-            continue
+    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+        future = {
+            executor.submit(
+                lambda : chain.invoke({"input": str([m["message"] for m in messages[i : min(i + batch_size, len(messages))]])})
+            ): i
+            for i in range(0, len(messages), batch_size)
+        }
+        for f in tqdm(as_completed(future), total=len(future), desc='Extracting keywords'):
+            i = future[f]
+            end_idx = min(len(messages), i + batch_size)
+            try:
+                response = f.result()
+            
+            except Exception:
+                print(f'Error while generating response for batch {i} - {end_idx}')
+                keywords += ['error' for _ in range(i, end_idx)]
+                continue
 
-        try:
-            parsed_response = _parse_llm_output(response)
-            keywords += parsed_response
+            try:
+                parsed_response = _parse_llm_output(response)
+                keywords += parsed_response
 
-        except Exception as exc:
-            print(f'Error while parsing LLM output for batch {i} - {end_idx}: {exc}')
-            keywords += ['error' for _ in range(i, end_idx)]
+            except Exception as exc:
+                print(f'Error while parsing LLM output for batch {i} - {end_idx}: {exc}')
+                keywords += ['error' for _ in range(i, end_idx)]
 
     extracted_messages = []
     error_messages = []
