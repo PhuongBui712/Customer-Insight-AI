@@ -34,7 +34,12 @@ def load_worksheet(sheet_id: Optional[str] = None, sheet_idx: Optional[int] = No
     return pd.DataFrame(worksheet.get_all_records())
 
 
-def update_worksheet(dataframe: DataFrame, sheet_id: Optional[str] = None, sheet_idx: Optional[int] = None, mode: Literal['update', 'replace'] = 'update') -> None:
+def update_worksheet(
+        dataframe: DataFrame,
+        sheet_id: Optional[str] = None,
+        sheet_idx: Optional[int] = None,
+        mode: Literal['update', 'replace'] = 'update'
+) -> None:
     if sheet_id is None and sheet_idx is None:
         raise Exception("Please provide either `sheet_id` or `sheet_idx")
     
@@ -47,6 +52,15 @@ def update_worksheet(dataframe: DataFrame, sheet_id: Optional[str] = None, sheet
     # update worksheet
     if mode == 'replace':
         worksheet.clear()
+    
+    # preprocess df
+    # astype datetime to string
+    datetime_columns = dataframe.select_dtypes(include=['datetime64[ns]']).columns
+    dataframe[datetime_columns] = dataframe[datetime_columns].astype(str)
+    # convert a list to string
+    for col in dataframe.columns:
+        if dataframe[col].apply(lambda x: isinstance(x, list)).any():
+            dataframe[col] = dataframe[col].apply(lambda x: ','.join(x) if isinstance(x, list) else x)
     
     worksheet.update([dataframe.columns.values.tolist()] + dataframe.values.tolist())
 
@@ -87,6 +101,22 @@ def create_dataframe(messages: List[dict]) -> DataFrame:
     # transform timezone
     df['inserted_at'] = df['inserted_at'].dt.tz_localize('UTC')
     df['inserted_at'] = df['inserted_at'].dt.tz_convert('Asia/Bangkok')
+    df['inserted_at'] = df['inserted_at'].dt.tz_localize(None)
+
+    return df
+
+
+def sheet_to_df(raw_sheet: DataFrame) -> DataFrame:
+    if raw_sheet.empty:
+        return raw_sheet
+    
+    # convert to datetime
+    df = raw_sheet.copy()
+    df['inserted_at'] = pd.to_datetime(df['inserted_at'], format='%Y-%m-%d %H:%M:%S')
+    
+    # convert string -> list[str]
+    for col in ['user', 'purpose']:
+        df[col] = df[col].apply(lambda x: x.split(',') if ',' in x else [x])
 
     return df
 
