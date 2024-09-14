@@ -206,7 +206,7 @@ def classify_inquiry_pipeline(
                 mask += ["error" for _ in range(i, end_idx)]
 
     # get output to return
-    classified_messages = [m for m, l in zip(messages, mask) if l >= min_score]
+    classified_messages = [m for m, l in zip(messages, mask) if l != 'error' and l >= min_score]
     error_messages = [m for m, l in zip(messages, mask) if l == "error"]
 
     return classified_messages, error_messages
