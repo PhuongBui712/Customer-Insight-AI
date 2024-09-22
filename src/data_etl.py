@@ -210,8 +210,7 @@ def remove_old_data(table_path: str, sheet_idx: int, queue_path: str, num_days_b
         save_json(queue_path, queue_messsages)
     
     # remove data on sheet
-    message_df = load_worksheet(sheet_idx=sheet_idx)
-    message_df = pd.to_datetime(message_df['inserted_at'], format='%Y-%m-%d %H:%M:%S')
+    message_df = sheet_to_df(load_worksheet(sheet_idx=sheet_idx))
     message_df = message_df.loc[message_df['inserted_at'] > date_bound]
 
     # udpate worksheet
@@ -251,12 +250,12 @@ def load_analyse_data(config: dict, messages: List[str], num_sample: int = 500):
 
 
 # task 6: update tables
-def update_table(config: dict, processed_messages: List[dict]):
+def update_table(config: dict, processed_messages: List[dict], template_messages: List[dict]):
     # update message df
     message_sheet_idx = config['google-sheet']['message-sheet-idx']
     last_message_sheet = load_worksheet(sheet_idx=message_sheet_idx)
     last_message_df = sheet_to_df(last_message_sheet)
-    new_message_df = create_dataframe(processed_messages)
+    new_message_df = create_dataframe(processed_messages + template_messages)
     updated_message_df = pd.concat([last_message_df, new_message_df], axis=0)
 
     update_worksheet(updated_message_df, sheet_idx=message_sheet_idx, mode='replace')
@@ -265,7 +264,7 @@ def update_table(config: dict, processed_messages: List[dict]):
     # update 2 stats sheet
     user_sheet_idx = config['google-sheet']['user-sheet-idx']
     purpose_sheet_idx = config['google-sheet']['purpose-sheet-idx']
-    user_df, purpose_df = analyse_data(updated_message_df)
+    user_df, purpose_df = quantify_data(updated_message_df)
 
     update_worksheet(user_df, sheet_idx=user_sheet_idx, mode='replace')
     user_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['user-table']))
@@ -298,10 +297,13 @@ def analyse_customer_message_pipeline():
     messages = load_analyse_data(config, messages, config['num-sample'])
 
     # 5. analysing
-    processed_messages, error_messages = analyse_message_pipeline(
+    important_keywords = config['product-keywords'] + config['important-message-keywords']
+
+    template_messages, processed_messages, error_messages = analyse_message_pipeline(
         messages,
-        filter_patterns=config['filter-message-keywords'],
-        template_messages=config['template-message'],
+        remove_keywords=config['unimportant-message-keywords'],
+        filter_keywords=important_keywords,
+        template=config['template-message'],
         important_score=config['important-score'],
         provider=config['provider']
     )
@@ -313,7 +315,7 @@ def analyse_customer_message_pipeline():
 
     # 7. update tables
     if processed_messages:
-        update_table(config, processed_messages)
+        update_table(config, processed_messages, template_messages)
 
 
 if __name__ == '__main__':
