@@ -54,15 +54,17 @@ def update_worksheet(
         worksheet.clear()
     
     # preprocess df
+    upload_df = dataframe.copy()
+
     # astype datetime to string
-    datetime_columns = dataframe.select_dtypes(include=['datetime64[ns]']).columns
-    dataframe[datetime_columns] = dataframe[datetime_columns].astype(str)
+    datetime_columns = upload_df.select_dtypes(include=['datetime64[ns]']).columns
+    upload_df[datetime_columns] = upload_df[datetime_columns].astype(str)
     # convert a list to string
-    for col in dataframe.columns:
-        if dataframe[col].apply(lambda x: isinstance(x, list)).any():
-            dataframe[col] = dataframe[col].apply(lambda x: ','.join(x) if isinstance(x, list) else x)
+    for col in upload_df.columns:
+        if upload_df[col].apply(lambda x: isinstance(x, list)).any():
+            upload_df[col] = upload_df[col].apply(lambda x: ','.join(x) if isinstance(x, list) else x)
     
-    worksheet.update([dataframe.columns.values.tolist()] + dataframe.values.tolist())
+    worksheet.update([upload_df.columns.values.tolist()] + upload_df.values.tolist())
 
 
 # --------------------- Specific functions ---------------------
@@ -121,7 +123,7 @@ def sheet_to_df(raw_sheet: DataFrame) -> DataFrame:
     return df
 
 
-def analyse_data(message_df: DataFrame, user_col: str = 'user', purpose_col: str = 'purpose') -> DataFrame:
+def quantify_data(message_df: DataFrame, user_col: str = 'user', purpose_col: str = 'purpose') -> DataFrame:
     user = message_df[[user_col]]
     count_user = user.explode([user_col])
     count_user = count_user.value_counts(user_col, ascending=False).reset_index()
