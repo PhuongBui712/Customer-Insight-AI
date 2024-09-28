@@ -1,5 +1,6 @@
 import json
 import time
+import logging
 from threading import Lock
 from typing import Optional, List, Dict
 
@@ -7,6 +8,56 @@ from langchain_groq import ChatGroq
 from langchain_google_genai import GoogleGenerativeAI
 from langchain.prompts import PromptTemplate, ChatPromptTemplate
 
+
+# class LLMCaller:
+#     """
+#     A class to manage the rate of requests to an LLM.
+    
+#     This class implements a simple rate limiting mechanism to prevent exceeding the maximum number of requests per minute allowed by the LLM API.
+    
+#     Attributes:
+#         max_request_per_minute (int): The maximum number of requests allowed per minute.
+#         _request_counter (int): The number of requests made in the current minute.
+#         _last_reset_time (float): The timestamp of the last time the request counter was reset.
+#         _state_lock (Lock): A lock to protect the request counter and last reset time from concurrent access.
+#     """
+#     _request_counter = 0
+#     _last_reset_time = 0.0
+#     _state_lock = Lock()
+
+#     def __init__(self, max_request_per_minute: int):
+#         self.max_request_per_minute = max_request_per_minute
+
+#     def _reset_counter(self) -> None:
+#         current_time = time.time()
+#         if self._last_reset_time == 0.0 or current_time - self._last_reset_time >= 60:
+#             self._request_counter = 0
+#             self._last_reset_time = current_time
+
+#     def _wait_to_next_minute(self) -> None:
+#         """
+#         Wait until the start of the next minute.
+#         """
+#         wait_time = max(0, self._last_reset_time + 60 - time.time())
+#         time.sleep(wait_time)
+#         self._reset_counter()
+
+#     def _increment_counter(self, num_request: int) -> None:
+#         """
+#         Increment the request counter and wait if the limit is reached.
+
+#         This method increments the internal request counter by the specified number of requests.
+#         If the total number of requests exceeds the maximum allowed per minute, it waits until the start of the next minute before incrementing the counter.
+#         """
+#         with self._state_lock:
+#             self._reset_counter()
+#             if self._request_counter + num_request > self.max_request_per_minute:
+#                 self._wait_to_next_minute()
+#             self._request_counter += num_request
+
+
+import time
+from threading import Lock, Condition
 
 class LLMCaller:
     """
@@ -19,13 +70,15 @@ class LLMCaller:
         _request_counter (int): The number of requests made in the current minute.
         _last_reset_time (float): The timestamp of the last time the request counter was reset.
         _state_lock (Lock): A lock to protect the request counter and last reset time from concurrent access.
+        _condition (Condition): A condition variable to coordinate waiting between threads.
     """
     _request_counter = 0
     _last_reset_time = 0.0
-    _state_lock = Lock()
 
     def __init__(self, max_request_per_minute: int):
         self.max_request_per_minute = max_request_per_minute
+        self._state_lock = Lock()
+        self._condition = Condition(self._state_lock)
 
     def _reset_counter(self) -> None:
         current_time = time.time()
@@ -37,9 +90,11 @@ class LLMCaller:
         """
         Wait until the start of the next minute.
         """
-        wait_time = max(0, self._last_reset_time + 60 - time.time())
-        time.sleep(wait_time)
-        self._reset_counter()
+        with self._state_lock:
+            wait_time = max(0, self._last_reset_time + 60 - time.time())
+            if wait_time > 0:
+                self._condition.wait(timeout=wait_time)
+            self._reset_counter()
 
     def _increment_counter(self, num_request: int) -> None:
         """
@@ -50,9 +105,10 @@ class LLMCaller:
         """
         with self._state_lock:
             self._reset_counter()
-            if self._request_counter + num_request > self.max_request_per_minute:
+            while self._request_counter + num_request > self.max_request_per_minute:
                 self._wait_to_next_minute()
             self._request_counter += num_request
+            self._condition.notify_all()
 
 
 class GroqAICaller(LLMCaller):
@@ -114,7 +170,7 @@ class GroqAICaller(LLMCaller):
             result = self.chain.invoke(input).content
         except Exception as exc:
             if self._extract_error_code(exc) == 429:
-                print('Reaching maximum resources, wait to next minutes!')
+                logging.info('Reaching maximum resources, wait to next minutes!')
                 self._wait_to_next_minute()
             
             result = self.chain.invoke(input).content
@@ -185,7 +241,7 @@ class GoogleAICaller(LLMCaller):
             result = self.chain.invoke(input)
         except Exception as exc:
             if self._extract_error_code(exc) == 429:
-                print('Reaching maximum resources, wait to next minutes!')
+                logging.info('Reaching maximum resources, wait to next minutes!')
                 self._wait_to_next_minute()
                 result = self.chain.invoke(input)
 
