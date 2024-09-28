@@ -1,11 +1,11 @@
-import os
+import os, sys
+sys.path.append(os.path.dirname(__file__))
+
 import re
 import time
 import pandas as pd
-from pandas import DataFrame
 from tqdm import tqdm
 from typing import List, Dict
-
 from pancake import *
 from data_analysing import *
 from data_presentation import *
@@ -40,7 +40,7 @@ def update_page(schema_path: str, default_last_check: int = 30, page_filter_patt
         if v['page_access_token'] is None or k not in page_schema:
             no_access_token_pages.append(k)
         elif page_schema[k]['page_access_token'] != v['page_access_token']:
-            page_schema[k]['page_access_token'] != v['page_access_token']
+            page_schema[k]['page_access_token'] = v['page_access_token']
 
     # generate `page_access_token`
     no_access_token_pages = {k: v for k, v in pages.items() if v['page_access_token'] is None}
@@ -57,6 +57,7 @@ def update_page(schema_path: str, default_last_check: int = 30, page_filter_patt
 
         # others case
         page_schema[k] = {}
+        page_schema[k]['name'] = pages[k]['name']
         page_schema[k]['page_access_token'] = pages[k]['page_access_token']
         # set up for conversations, messages scheme
         page_schema[k]['last_check'] = get_day_before(default_last_check)
@@ -186,11 +187,45 @@ def setup_data_directory(root_dir: str, sub_dir_list: List[str]) -> None:
         os.makedirs(os.path.join(root_dir, dir), exist_ok=True)
 
 
+def load_table(
+        path: str,
+        list_cols: Optional[List[str]] = None,
+        datetime_cols: Optional[List[str]] = None, 
+        datetime_format: str = '%Y-%m-%d %H:%M:%S'
+) -> DataFrame:
+    # Read the CSV file into a DataFrame
+    try:
+        df = pd.read_csv(path)
+    except Exception as exc:
+        return pd.DataFrame()
+
+    # Process list columns
+    if list_cols:
+        for col in list_cols:
+            # Apply the following steps to clean and convert the string into a list
+            def process_list(item):
+                if pd.isna(item):  # Handle missing values
+                    return []
+                
+                # Remove square brackets if present, and then split by comma
+                item = item.strip("[]")  # Remove surrounding brackets
+                return [x.strip().strip("'") for x in item.split(',')]  # Split by commas and strip extra spaces
+
+            df[col] = df[col].apply(process_list)
+
+    # Convert datetime columns
+    if datetime_cols:
+        for col in datetime_cols:
+            df[col] = pd.to_datetime(df[col], format=datetime_format, errors='coerce')  # Handle format and errors
+
+    return df
+
+
 # --------------------- ETL tasks ---------------------
-# task: remove old data at beginning of a day
-def remove_old_data(table_path: str, sheet_idx: int, queue_path: str, num_days_before: int):
+# task 2: remove old data at beginning of a day
+def remove_old_data(config: dict):
     # check data has been collected
-    if not os.path.exists(table_path):
+    if not os.path.exists(config['message-table']):
         return
     
     # just remove data once per day
@@ -198,29 +233,35 @@ def remove_old_data(table_path: str, sheet_idx: int, queue_path: str, num_days_b
     if now.hour != 0 and now.minute > 30:
         return
     
-    date_bound = get_day_before(num_days_before, return_type='date')
+    date_bound = get_day_before(config['oldest-date'], return_type='date')
     
     # remove data on queue
-    if os.path.exists(queue_path):
-        queue_messsages = load_json(queue_path)
+    if os.path.exists(config['queue-message']):
+        queue_messsages = load_json(config['queue-message'])
         queue_messsages = [
             m for m in queue_messsages 
             if string_to_unix_second(m['inserted_at']) > int(date_bound.timestamp())
         ]
-        save_json(queue_path, queue_messsages)
+        save_json(config['queue-message'], queue_messsages)
     
     # remove data on sheet
-    message_df = sheet_to_df(load_worksheet(sheet_idx=sheet_idx))
-    message_df = message_df.loc[message_df['inserted_at'] > date_bound]
+    for path, sheet_name in zip(
+        (config['message-table'], config['question-table']),
+        (config['message-sheet'], config['question-sheet'])
+    ):
+        # remove
+        load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
+        if path == config['message-table']:
+            load_table_args.update({'list_cols': ['user', 'purpose']})
+        message_df = load_table(**load_table_args)
+        message_df = message_df.loc[message_df['inserted_at'] > date_bound]
 
-    # udpate worksheet
-    update_worksheet(message_df, sheet_idx=sheet_idx)
-
-    # update local sheet
-    message_df.to_csv(table_path, index=False)
+        # update
+        update_worksheet(message_df, sheet_name=sheet_name, mode='replace')
+        message_df.to_csv(path, index=False)
 
 
-# task 2: update new data (pages, conversations, messages)
+# task 3: update new data (pages, conversations, messages)
 def update_new_data(config: dict) -> List[dict]:
     schema = os.path.join(PROJECT_DIRECTORY, config['schema'])
     default_last_check = config['default-last-check']
@@ -236,40 +277,72 @@ def update_new_data(config: dict) -> List[dict]:
     return messages
 
 
-# task 3: load data to be analysed
+# task 4: load data to be analysed
 def load_analyse_data(config: dict, messages: List[str], num_sample: int = 500):
+    # load queue messages
+    queue_path = os.path.join(PROJECT_DIRECTORY, config['queue-message'])
+    queue_messages = messages
+    if os.path.exists(queue_path):
+        queue_messages = load_json(queue_path) + messages
+        # deduplicate
+        queue_messages = [json.loads(item) for item in {json.dumps(d, sort_keys=True) \
+                                                        for d in queue_messages}]
+    
     # load messages needed to analyse
-    analyse_messages = messages[-num_sample:]
+    analyse_messages = queue_messages[-num_sample:]
+    queue_messages = queue_messages[:-num_sample]
 
     # store queue messages
-    queue_path = os.path.join(PROJECT_DIRECTORY, config['queue-message'])
-    queue_messages = messages[:-num_sample]
     save_json(queue_path, queue_messages)
 
     return analyse_messages
 
 
 # task 6: update tables
-def update_table(config: dict, processed_messages: List[dict], template_messages: List[dict]):
-    # update message df
-    message_sheet_idx = config['google-sheet']['message-sheet-idx']
-    last_message_sheet = load_worksheet(sheet_idx=message_sheet_idx)
-    last_message_df = sheet_to_df(last_message_sheet)
-    new_message_df = create_dataframe(processed_messages + template_messages)
-    updated_message_df = pd.concat([last_message_df, new_message_df], axis=0)
+def update_table(config: dict, extracted_messages: List[dict], questions: List[dict]):
+    # update message and question sheet
+    updated_message_df = None # keep this df for later
+    for new_table, sheet_name, path in zip(
+        (extracted_messages, questions),
+        (config['message-sheet'], config['question-sheet']),
+        (config['message-table'], config['question-table'])
+    ):
+        if new_table: # avoid empty list
+            # load existence df
+            load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
+            if path == config['message-table']:
+                load_table_args.update({'list_cols': ['user', 'purpose']})
+            last_df = load_table(**load_table_args)
 
-    update_worksheet(updated_message_df, sheet_idx=message_sheet_idx, mode='replace')
-    updated_message_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['message-table']), index=False)
+            # convert new extracted messages to df
+            new_df = create_dataframe(new_table)
+
+            # concat to newest df
+            updated_df = pd.concat([last_df, new_df], axis=0)
+
+            # deduplicate
+            updated_df = drop_dataframe_duplicates(updated_df)
+            if sheet_name == config['message-sheet']:
+                updated_message_df = updated_df.copy()
+
+            # upload to google sheet and store local
+            update_worksheet(updated_df, sheet_name=sheet_name, mode='replace', sorted_by='inserted_at')
+            updated_df.to_csv(os.path.join(PROJECT_DIRECTORY, path), index=False)
 
     # update 2 stats sheet
-    user_sheet_idx = config['google-sheet']['user-sheet-idx']
-    purpose_sheet_idx = config['google-sheet']['purpose-sheet-idx']
-    user_df, purpose_df = quantify_data(updated_message_df)
+    if extracted_messages: # avoid empty list
+        user_sheet_name = config['user-sheet']
+        purpose_sheet_name = config['purpose-sheet']
+        user_df, purpose_df = quantify_data(updated_message_df)
 
-    update_worksheet(user_df, sheet_idx=user_sheet_idx, mode='replace')
-    user_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['user-table']))
-    update_worksheet(purpose_df, sheet_idx=purpose_sheet_idx, mode='replace')
-    purpose_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['purpose-table']))
+        update_worksheet(user_df, sheet_name=user_sheet_name, mode='replace')
+        user_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['user-table']))
+        update_worksheet(purpose_df, sheet_name=purpose_sheet_name, mode='replace')
+        purpose_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['purpose-table']))
+
+    # clean spreadsheet
+    clean_spreadsheet(sheets=[config['message-sheet'], config['question-sheet'],
+                              config['user-sheet'], config['purpose-sheet']])
     
 
 # complete ETL
@@ -285,10 +358,7 @@ def analyse_customer_message_pipeline():
     )
 
     # 2. Check new day & delete old data
-    message_table_path = os.path.join(PROJECT_DIRECTORY, config['message-table'])
-    queue_path = os.path.join(PROJECT_DIRECTORY, config['queue-message'])
-    message_sheet_idx = config['google-sheet']['message-sheet-idx']
-    remove_old_data(table_path=message_table_path, sheet_idx=message_sheet_idx, queue_path=queue_path, num_days_before=90)
+    remove_old_data(config)
 
     # 3. get new messages
     messages = update_new_data(config)
@@ -299,23 +369,25 @@ def analyse_customer_message_pipeline():
     # 5. analysing
     important_keywords = config['product-keywords'] + config['important-message-keywords']
 
-    template_messages, processed_messages, error_messages = analyse_message_pipeline(
+    extracted_messages, questions, error_messages = analyse_message_pipeline(
         messages,
         remove_keywords=config['unimportant-message-keywords'],
         filter_keywords=important_keywords,
+        question_keywords=config['question-keywords'],
         template=config['template-message'],
         important_score=config['important-score'],
         provider=config['provider']
     )
 
     # 6. store error messages to queue
+    queue_path = os.path.join(PROJECT_DIRECTORY, config['queue-message'])
     if error_messages:
         queue_message = load_json(queue_path) + error_messages
         save_json(queue_path, queue_message)
 
     # 7. update tables
-    if processed_messages:
-        update_table(config, processed_messages, template_messages)
+    update_table(config, extracted_messages, questions)
+    # return extracted_messages, questions
 
 
 if __name__ == '__main__':
