@@ -2,6 +2,8 @@ import os
 import yaml
 import json
 import pytz
+import pandas as pd
+from pandas import DataFrame
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, List, Tuple, Union
 
@@ -81,3 +83,29 @@ def get_day_before(num_days: int, return_type: Literal['date', 'timestamp'] = 't
 def split_time_stamp(since: int, until: int, time_delta: int = 30*24*60*60) -> List[Tuple[int, int]]:
     result = [(t, min(t + time_delta, until)) for t in range(since, until, time_delta)]
     return result 
+
+
+def drop_dataframe_duplicates(df: DataFrame) -> DataFrame:
+    # Create a copy to avoid modifying the original dataframe
+    df_copy = df.copy()
+
+    # Dictionary to track columns that need conversion back
+    conversion_columns = []
+
+    # Iterate over columns
+    for col in df_copy.columns:
+        # Check if the column contains unhashable types (e.g., lists or dictionaries)
+        if df_copy[col].apply(lambda x: isinstance(x, (list, dict))).any():
+            # Convert the unhashable column (e.g., lists) to tuples
+            df_copy[col] = df_copy[col].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+            # Track the columns that were converted
+            conversion_columns.append(col)
+
+    # Drop duplicates
+    df_copy = df_copy.drop_duplicates()
+
+    # Convert the columns that were modified back to their original types (lists, etc.)
+    for col in conversion_columns:
+        df_copy[col] = df_copy[col].apply(lambda x: list(x) if isinstance(x, tuple) else x)
+
+    return df_copy

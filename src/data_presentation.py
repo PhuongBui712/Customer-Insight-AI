@@ -8,6 +8,8 @@ from typing import Optional, Literal, List
 
 from dotenv import load_dotenv
 
+from utils import PROJECT_DIRECTORY
+
 
 load_dotenv()
 
@@ -15,39 +17,48 @@ _SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets'
 ]
 
-_creds = Credentials.from_service_account_file("credentials.json", scopes=_SCOPES)
+_credential_file = os.path.join(PROJECT_DIRECTORY, "credentials.json")
+_creds = Credentials.from_service_account_file(_credential_file, scopes=_SCOPES)
 _client = gspread.authorize(_creds)
 sheet_id = os.environ['SHEET_ID']
-sheet = _client.open_by_key(sheet_id)
+spreadsheet = _client.open_by_key(sheet_id)
 
 
-def load_worksheet(sheet_id: Optional[str] = None, sheet_idx: Optional[int] = None) -> DataFrame:
-    if sheet_id is None and sheet_idx is None:
-        raise Exception("Please provide either a sheet id or sheet index.")
+def load_worksheet(sheet_name: str, return_type: Literal['sheet', 'dataframe'] = 'dataframe') -> DataFrame:
+    """
+    Load a worksheet by name. If it doesn't exist, create it.
+    
+    Args:
+    sheet_name (str): The name of the worksheet to load or create.
+    spreadsheet (gspread.Spreadsheet): The spreadsheet object containing the worksheet.
+    
+    Returns:
+    DataFrame: A DataFrame containing the worksheet data.
+    """
+    try:
+        worksheet = spreadsheet.worksheet(sheet_name)
+    except gspread.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=100)
+    
+    if return_type == 'sheet':
+        return worksheet
 
-    worksheet = None
-    if sheet_id:
-        worksheet = sheet.get_worksheet_by_id(sheet_id)
-    else:
-        worksheet = sheet.get_worksheet(sheet_idx)
-
-    return pd.DataFrame(worksheet.get_all_records())
+    # Get all records from the worksheet
+    records = worksheet.get_all_records()
+    
+    if not records:
+        return DataFrame()
+    return DataFrame(records)
 
 
 def update_worksheet(
         dataframe: DataFrame,
-        sheet_id: Optional[str] = None,
-        sheet_idx: Optional[int] = None,
-        mode: Literal['update', 'replace'] = 'update'
+        sheet_name: str,
+        mode: Literal['update', 'replace'] = 'update',
+        sorted_by: Optional[str] = None,
+        ascending: bool = False
 ) -> None:
-    if sheet_id is None and sheet_idx is None:
-        raise Exception("Please provide either `sheet_id` or `sheet_idx")
-    
-    # get worksheet
-    if sheet_id:
-        worksheet = sheet.get_worksheet_by_id(sheet_id)
-    else:
-        worksheet = sheet.get_worksheet(sheet_idx)
+    worksheet = load_worksheet(sheet_name=sheet_name, return_type='sheet')
 
     # update worksheet
     if mode == 'replace':
@@ -56,16 +67,28 @@ def update_worksheet(
     # preprocess df
     upload_df = dataframe.copy()
 
+    # sort df by datetime
+    if sorted_by is not None:
+        upload_df = upload_df.sort_values(by=sorted_by, ascending=ascending)
+    
     # astype datetime to string
     datetime_columns = upload_df.select_dtypes(include=['datetime64[ns]']).columns
     upload_df[datetime_columns] = upload_df[datetime_columns].astype(str)
+    
     # convert a list to string
     for col in upload_df.columns:
         if upload_df[col].apply(lambda x: isinstance(x, list)).any():
             upload_df[col] = upload_df[col].apply(lambda x: ','.join(x) if isinstance(x, list) else x)
-    
+
+    # print([upload_df.columns.values.tolist()] + upload_df.values.tolist())
     worksheet.update([upload_df.columns.values.tolist()] + upload_df.values.tolist())
 
+
+def clean_spreadsheet(sheets: List[str]) -> None:
+    all_sheets = spreadsheet.worksheets()
+    for worksheet in all_sheets:
+        if worksheet.title not in sheets:
+            spreadsheet.del_worksheet(worksheet)
 
 # --------------------- Specific functions ---------------------
 # These functions are specific to the data structure used in this
@@ -118,7 +141,10 @@ def sheet_to_df(raw_sheet: DataFrame) -> DataFrame:
     
     # convert string -> list[str]
     for col in ['user', 'purpose']:
-        df[col] = df[col].apply(lambda x: x.split(',') if ',' in x else [x])
+        try:
+            df[col] = df[col].apply(lambda x: x.split(',') if ',' in x else [x])
+        except Exception as exc:
+            continue
 
     return df
 
@@ -126,10 +152,12 @@ def sheet_to_df(raw_sheet: DataFrame) -> DataFrame:
 def quantify_data(message_df: DataFrame, user_col: str = 'user', purpose_col: str = 'purpose') -> DataFrame:
     user = message_df[[user_col]]
     count_user = user.explode([user_col])
+    count_user = count_user[count_user[user_col] != '']
     count_user = count_user.value_counts(user_col, ascending=False).reset_index()
 
     purpose = message_df[[purpose_col]]
     count_purpose = purpose.explode([purpose_col])
+    count_purpose = count_purpose[count_purpose[purpose_col] != '']
     count_purpose = count_purpose.value_counts(purpose_col, ascending=False).reset_index()
 
     return count_user, count_purpose
