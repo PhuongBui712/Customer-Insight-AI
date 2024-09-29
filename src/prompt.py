@@ -212,7 +212,7 @@ Quy tắc phân loại:
 Nếu mục đích tương tự hoặc liên quan đến một trong các mục này, hãy sử dụng thuật ngữ trong danh sách. Ví dụ:
    - "ăn" tương tự với "tẩm bổ"
    - "thăm ốm" tương đương với "thăm bệnh"
-2. Khi xác định đối tượng sử dụng, ưu tiên phân loại vào một hoặc nhiều mục trong danh sách sau: ["bố", "mẹ", "người thân", "vợ, "chồng", "trẻ con", "người già", "mẹ bầu", "người bệnh"]. Nếu đối tượng tương tự hoặc thuộc một trong các mục này, hãy sử dụng thuật ngữ trong danh sách. Ví dụ:
+2. Khi xác định đối tượng sử dụng, ưu tiên phân loại vào một hoặc nhiều mục trong danh sách sau: ["bố", "mẹ", "người thân", "vợ/chồng", "trẻ con", "người già", "mẹ bầu", "người bệnh"]. Nếu đối tượng tương tự hoặc thuộc một trong các mục này, hãy sử dụng thuật ngữ trong danh sách. Ví dụ:
    - "người ốm" tương tự với "người bệnh"
    - "con cái" tương tự với "trẻ con"
 3. Nếu mục đích hoặc đối tượng được trích xuất hoàn toàn khác với các mục trong danh sách, hãy trả về từ khoá như trong tin nhắn.
