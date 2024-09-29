@@ -9,7 +9,7 @@ from typing import Optional, Literal, List, Tuple, Union
 
 
 NUM_WORKERS = min(os.cpu_count() - 1, max(7, os.cpu_count() // 2))
-PROJECT_DIRECTORY = os.path.join(os.path.dirname(__file__), '..')
+PROJECT_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 
 def load_yaml(path: str) -> dict:
@@ -29,6 +29,10 @@ def load_json(path: str) -> dict:
 def save_json(path: str, content: Union[dict, list], indent: int = 4) -> None:
     with open(path, 'w', encoding='utf-8') as file:
         json.dump(content, file, indent=indent, ensure_ascii=False)
+
+
+def get_project_item_path(relevant_path: str) -> str:
+    return os.path.join(PROJECT_DIRECTORY, relevant_path)
 
 
 def string_to_unix_second(s: str,
@@ -96,7 +100,7 @@ def drop_dataframe_duplicates(df: DataFrame) -> DataFrame:
     for col in df_copy.columns:
         # Check if the column contains unhashable types (e.g., lists or dictionaries)
         if df_copy[col].apply(lambda x: isinstance(x, (list, dict))).any():
-            # Convert the unhashable column (e.g., lists) to tuples
+            # Convert the unhashable column to tuples
             df_copy[col] = df_copy[col].apply(lambda x: tuple(x) if isinstance(x, list) else x)
             # Track the columns that were converted
             conversion_columns.append(col)
