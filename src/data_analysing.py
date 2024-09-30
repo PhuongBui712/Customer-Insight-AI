@@ -361,6 +361,10 @@ def analyse_message_pipeline(messages: List[dict],
         template_messages, messages = handle_template_message(template, messages)
         extracted_messages += template_messages
 
+    # filter to avoid exceed limit tokens
+    messages = messages[-400:]
+    error_messages = messages[:-400]
+
     # extract user and purpose
     classified_mess, error = classify_inquiry_pipeline(messages, important_score, batch_size, provider)
     error_messages += error
