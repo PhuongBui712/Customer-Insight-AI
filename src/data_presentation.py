@@ -80,8 +80,11 @@ def update_worksheet(
         if upload_df[col].apply(lambda x: isinstance(x, list)).any():
             upload_df[col] = upload_df[col].apply(lambda x: ','.join(x) if isinstance(x, list) else x)
 
-    # print([upload_df.columns.values.tolist()] + upload_df.values.tolist())
-    worksheet.update([upload_df.columns.values.tolist()] + upload_df.values.tolist())
+    try:
+        worksheet.update([upload_df.columns.values.tolist()] + upload_df.values.tolist())
+    except Exception as exc:
+        print(exc)
+        print(f"Data:\n{[upload_df.columns.values.tolist()] + upload_df.values.tolist()}")
 
 
 def clean_spreadsheet(sheets: List[str]) -> None:
