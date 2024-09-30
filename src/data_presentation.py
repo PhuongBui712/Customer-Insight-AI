@@ -58,11 +58,16 @@ def update_worksheet(
         sorted_by: Optional[str] = None,
         ascending: bool = False
 ) -> None:
+    # load previous sheet
     worksheet = load_worksheet(sheet_name=sheet_name, return_type='sheet')
+    last_df = load_worksheet(sheet_name=sheet_name, return_type='dataframe')
 
     # update worksheet
     if mode == 'replace':
-        worksheet.clear()
+        try:
+            worksheet.clear()
+        except Exception as exc:
+            worksheet.update([last_df.columns.values.tolist()] + last_df.values.tolist())
     
     # preprocess df
     upload_df = dataframe.copy()
@@ -83,8 +88,12 @@ def update_worksheet(
     try:
         worksheet.update([upload_df.columns.values.tolist()] + upload_df.values.tolist())
     except Exception as exc:
+        # logging error
         print(exc)
         print(f"Data:\n{[upload_df.columns.values.tolist()] + upload_df.values.tolist()}")
+
+        # load the old sheet
+        worksheet.update([last_df.columns.values.tolist()] + last_df.values.tolist())
 
 
 def clean_spreadsheet(sheets: List[str]) -> None:
