@@ -7,6 +7,11 @@ from pandas import DataFrame
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, List, Tuple, Union
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
 
 NUM_WORKERS = min(os.cpu_count() - 1, max(7, os.cpu_count() // 2))
 PROJECT_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -113,3 +118,35 @@ def drop_dataframe_duplicates(df: DataFrame) -> DataFrame:
         df_copy[col] = df_copy[col].apply(lambda x: list(x) if isinstance(x, tuple) else x)
 
     return df_copy
+
+
+def update_env_variable(provider: Literal['groq', 'google'] = 'groq'):
+    # dotenv path
+    dotenv_path = get_project_item_path(".env")
+    
+    # key's names
+    key = provider.upper() + "_API_KEY"
+    key1 = key + "1"
+    key2 = key + "2"
+    
+    # Read all the lines from the .env file
+    with open(dotenv_path, 'r') as file:
+        lines = file.readlines()
+
+    # Check if the key exists and update it
+    with open(dotenv_path, 'w') as file:
+        key_found = False
+        for line in lines:
+            if line.startswith(key + '='):
+                new_value = os.getenv(key2) if os.getenv(key) == os.getenv(key1) else os.getenv(key1)
+                file.write(f'{key}={new_value}\n')
+                key_found = True
+            else:
+                file.write(line)
+        
+        # If the key wasn't found, add it at the end
+        if not key_found:
+            file.write(f'{key}={new_value}\n')
+
+    # Reload the environment variables
+    load_dotenv(dotenv_path, override=True)
