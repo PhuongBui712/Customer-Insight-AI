@@ -122,19 +122,19 @@ def call_llm(
             try:
                 response = f.result()
             except Exception as exc:
-                logging.info(f"Error while generating response for batch {i} - {end_idx - 1}")
+                print(f"Error while generating response for batch {i} - {end_idx - 1}")
                 continue
 
             try:
                 parsed_response = parse_llm_output(response)
                 if len(parsed_response) != end_idx - i:
-                    logging.info('Wrong size while query LLM, shutting down!')
+                    print('Wrong size while query LLM, shutting down!')
                     break
 
                 for j, idx in enumerate(range(i, end_idx)):
                     res[idx] = next(iter(parsed_response[j].values()))
             except Exception:
-                logging.info(f"Error while parsing LLM output for batch {i} - {end_idx - 1}")
+                print(f"Error while parsing LLM output for batch {i} - {end_idx - 1}")
 
     return res
 
