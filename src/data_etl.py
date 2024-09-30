@@ -225,7 +225,7 @@ def load_table(
 # task 2: remove old data at beginning of a day
 def remove_old_data(config: dict):
     # check data has been collected
-    if not os.path.exists(config['message-table']):
+    if not os.path.exists(get_project_item_path(config['queue-message'])):
         return
     
     # just remove data once per day
@@ -236,25 +236,34 @@ def remove_old_data(config: dict):
     date_bound = get_day_before(config['oldest-date'], return_type='date')
     
     # remove data on queue
-    if os.path.exists(config['queue-message']):
-        queue_messsages = load_json(config['queue-message'])
+    if os.path.exists(get_project_item_path(config['queue-message'])):
+        queue_messsages = load_json(get_project_item_path(config['queue-message']))
+        print(f'Before removing old data, queue size {len(queue_messsages)}')
+        
         queue_messsages = [
             m for m in queue_messsages 
             if string_to_unix_second(m['inserted_at']) > int(date_bound.timestamp())
         ]
-        save_json(config['queue-message'], queue_messsages)
+        print(f'After removing old data, queue size {len(queue_messsages)}')
+        
+        save_json(get_project_item_path(config['queue-message']), queue_messsages)
     
     # remove data on sheet
     for path, sheet_name in zip(
-        (config['message-table'], config['question-table']),
+        (get_project_item_path(config['message-table']), get_project_item_path(config['question-table'])),
         (config['message-sheet'], config['question-sheet'])
     ):
         # remove
         load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
-        if path == config['message-table']:
+        name = "question"
+        if sheet_name == config['message-sheet']:
             load_table_args.update({'list_cols': ['user', 'purpose']})
+            name = "message"
         message_df = load_table(**load_table_args)
+        
+        print(f'Before removing old data, {name} table: {message_df.shape}')
         message_df = message_df.loc[message_df['inserted_at'] > date_bound]
+        print(f'After removing old data, {name} table: {message_df.shape}')
 
         # update
         update_worksheet(message_df, sheet_name=sheet_name, mode='replace')
@@ -270,7 +279,7 @@ def update_new_data(config: dict) -> List[dict]:
     messages = [m for m in messages if m['from'] == 'customer']
 
     # store messages lists
-    queue_message_path = os.path.join(PROJECT_DIRECTORY, config['queue-message'])
+    queue_message_path = get_project_item_path(config['queue-message'])
     if os.path.exists(queue_message_path):
         messages = load_json(queue_message_path) + messages
 
@@ -280,7 +289,7 @@ def update_new_data(config: dict) -> List[dict]:
 # task 4: load data to be analysed
 def load_analyse_data(config: dict, messages: List[str], num_sample: int = 500):
     # load queue messages
-    queue_path = os.path.join(PROJECT_DIRECTORY, config['queue-message'])
+    queue_path = get_project_item_path(config['queue-message'])
     queue_messages = messages
     if os.path.exists(queue_path):
         queue_messages = load_json(queue_path) + messages
@@ -305,20 +314,25 @@ def update_table(config: dict, extracted_messages: List[dict], questions: List[d
     for new_table, sheet_name, path in zip(
         (extracted_messages, questions),
         (config['message-sheet'], config['question-sheet']),
-        (config['message-table'], config['question-table'])
+        (get_project_item_path(config['message-table']), get_project_item_path(config['question-table']))
     ):
         if new_table: # avoid empty list
             # load existence df
             load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
-            if path == config['message-table']:
+            name = "question"
+            if sheet_name == config['message-sheet']:
                 load_table_args.update({'list_cols': ['user', 'purpose']})
+                name = "message"
             last_df = load_table(**load_table_args)
 
+            print(f"Before updating, {name} table: {last_df.shape}")
+            
             # convert new extracted messages to df
             new_df = create_dataframe(new_table)
 
             # concat to newest df
             updated_df = pd.concat([last_df, new_df], axis=0)
+            print(f"After updating, {name} table: {updated_df.shape}")
 
             # deduplicate
             updated_df = drop_dataframe_duplicates(updated_df)
@@ -336,9 +350,9 @@ def update_table(config: dict, extracted_messages: List[dict], questions: List[d
         user_df, purpose_df = quantify_data(updated_message_df)
 
         update_worksheet(user_df, sheet_name=user_sheet_name, mode='replace')
-        user_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['user-table']))
+        user_df.to_csv(get_project_item_path(config['user-table']))
         update_worksheet(purpose_df, sheet_name=purpose_sheet_name, mode='replace')
-        purpose_df.to_csv(os.path.join(PROJECT_DIRECTORY, config['purpose-table']))
+        purpose_df.to_csv(get_project_item_path(config['purpose-table']))
 
     # clean spreadsheet
     clean_spreadsheet(sheets=[config['message-sheet'], config['question-sheet'],
@@ -348,9 +362,7 @@ def update_table(config: dict, extracted_messages: List[dict], questions: List[d
 # complete ETL
 def analyse_customer_message_pipeline():
     # 1. setup directory for etl pipeline
-    config = load_yaml(os.path.join(
-        PROJECT_DIRECTORY, 'config.yaml'
-    ))
+    config = load_yaml(get_project_item_path('config.yaml'))
 
     setup_data_directory(
         PROJECT_DIRECTORY,
@@ -380,7 +392,7 @@ def analyse_customer_message_pipeline():
     )
 
     # 6. store error messages to queue
-    queue_path = os.path.join(PROJECT_DIRECTORY, config['queue-message'])
+    queue_path = get_project_item_path(config['queue-message'])
     if error_messages:
         queue_message = load_json(queue_path) + error_messages
         save_json(queue_path, queue_message)
