@@ -399,8 +399,12 @@ def analyse_customer_message_pipeline():
 
     # 7. update tables
     update_table(config, extracted_messages, questions)
-    # return extracted_messages, questions
 
+    # 8. update api key
+    update_env_variable(config['provider'])
+
+    # return extracted_messages, questions
+    
 
 if __name__ == '__main__':
     analyse_customer_message_pipeline()
