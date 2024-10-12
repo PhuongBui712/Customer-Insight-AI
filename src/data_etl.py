@@ -129,7 +129,7 @@ def update_conversation(page_schema: dict, new_check: int):
             #     )
             
             # add to crawl list
-            last_update_timestamp = page_last_check if con_id not in last_conversations else string_to_unix_second(last_conversations[con_id]['updated_at'])
+            last_update_timestamp = page_last_check if con_id not in last_conversations else string_to_unix_second(last_conversations[con_id]['last_updated'])
             update_conversations.append(
                 # append page_id, page_access_token, conversation_id, customer_id, last_update
                 (page_id, page_access_token, con_id, con['customer_id'], last_update_timestamp)
@@ -287,12 +287,20 @@ def remove_old_data(config: dict):
 
 
 # task 3: update new data (pages, conversations, messages)
-def update_new_data(config: dict) -> List[dict]:
+def update_new_data(config: dict, remove_keywords: List[str] = None, filter_keywords: List[str] = None,) -> List[dict]:
+    # get new messages from pancake
     schema = os.path.join(PROJECT_DIRECTORY, config['schema'])
     default_last_check = config['default-last-check']
     filter_patterns = config['filter-page-keywords']
     messages = pancake_etl(schema, default_last_check, filter_patterns)
     messages = [m for m in messages if m['from'] == 'customer']
+
+    # analyse messages by keywords
+    if remove_keywords:
+        messages = keyword_filter(remove_keywords, messages, get_keyword=False)
+
+    if filter_keywords:
+        messages = keyword_filter(filter_keywords, messages, get_keyword=True)
 
     # store messages lists
     queue_message_path = get_project_item_path(config['queue-message'])
@@ -389,18 +397,20 @@ def analyse_customer_message_pipeline():
     remove_old_data(config)
 
     # 3. get new messages
-    messages = update_new_data(config)
+    important_keywords = config['product-keywords'] + config['important-message-keywords']
+    messages = update_new_data(
+        config,
+        remove_keywords=config['unimportant-message-keywords'],
+        filter_keywords=important_keywords
+    )
 
     # 4. load analyse messages
     messages = load_analyse_data(config, messages, config['num-sample'])
 
     # 5. analysing
-    important_keywords = config['product-keywords'] + config['important-message-keywords']
 
     extracted_messages, questions, error_messages = analyse_message_pipeline(
         messages,
-        remove_keywords=config['unimportant-message-keywords'],
-        filter_keywords=important_keywords,
         question_keywords=config['question-keywords'],
         template=config['template-message'],
         important_score=config['important-score'],
