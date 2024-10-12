@@ -65,7 +65,6 @@ def update_page(schema_path: str, default_last_check: int = 30, page_filter_patt
     
     return page_schema
 
-
 def update_conversation(page_schema: dict, new_check: int):
     # call newest conversations of all pages
     conversations = {}
@@ -246,9 +245,9 @@ def remove_old_data(config: dict):
         return
     
     # just remove data once per day
-    # now = get_current_time_utc_plus_7()
-    # if now.hour != 0 and now.minute > 30:
-    #     return
+    now = get_current_time_utc_plus_7()
+    if now.hour != 0 and now.minute > 30:
+        return
     
     date_bound = get_day_before(config['oldest-date'], return_type='date')
     
@@ -266,25 +265,25 @@ def remove_old_data(config: dict):
         save_json(get_project_item_path(config['queue-message']), queue_messsages)
     
     # remove data on sheet
-    # for path, sheet_name in zip(
-    #     (get_project_item_path(config['message-table']), get_project_item_path(config['question-table'])),
-    #     (config['message-sheet'], config['question-sheet'])
-    # ):
-    #     # remove
-    #     load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
-    #     name = "question"
-    #     if sheet_name == config['message-sheet']:
-    #         load_table_args.update({'list_cols': ['user', 'purpose']})
-    #         name = "message"
-    #     message_df = load_table(**load_table_args)
+    for path, sheet_name in zip(
+        (get_project_item_path(config['message-table']), get_project_item_path(config['question-table'])),
+        (config['message-sheet'], config['question-sheet'])
+    ):
+        # remove
+        load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
+        name = "question"
+        if sheet_name == config['message-sheet']:
+            load_table_args.update({'list_cols': ['user', 'purpose']})
+            name = "message"
+        message_df = load_table(**load_table_args)
         
-    #     print(f'Before removing old data, {name} table: {message_df.shape}')
-    #     message_df = message_df.loc[message_df['inserted_at'] > date_bound]
-    #     print(f'After removing old data, {name} table: {message_df.shape}')
+        print(f'Before removing old data, {name} table: {message_df.shape}')
+        message_df = message_df.loc[message_df['inserted_at'] > date_bound]
+        print(f'After removing old data, {name} table: {message_df.shape}')
 
-    #     # update
-    #     update_worksheet(message_df, sheet_name=sheet_name, mode='replace')
-    #     message_df.to_csv(path, index=False)
+        # update
+        update_worksheet(message_df, sheet_name=sheet_name, mode='replace')
+        message_df.to_csv(path, index=False)
 
 
 # task 3: update new data (pages, conversations, messages)
@@ -396,29 +395,29 @@ def analyse_customer_message_pipeline():
     messages = load_analyse_data(config, messages, config['num-sample'])
 
     # 5. analysing
-    # important_keywords = config['product-keywords'] + config['important-message-keywords']
+    important_keywords = config['product-keywords'] + config['important-message-keywords']
 
-    # extracted_messages, questions, error_messages = analyse_message_pipeline(
-    #     messages,
-    #     remove_keywords=config['unimportant-message-keywords'],
-    #     filter_keywords=important_keywords,
-    #     question_keywords=config['question-keywords'],
-    #     template=config['template-message'],
-    #     important_score=config['important-score'],
-    #     provider=config['provider']
-    # )
+    extracted_messages, questions, error_messages = analyse_message_pipeline(
+        messages,
+        remove_keywords=config['unimportant-message-keywords'],
+        filter_keywords=important_keywords,
+        question_keywords=config['question-keywords'],
+        template=config['template-message'],
+        important_score=config['important-score'],
+        provider=config['provider']
+    )
 
-    # # 6. store error messages to queue
-    # queue_path = get_project_item_path(config['queue-message'])
-    # if error_messages:
-    #     queue_message = load_json(queue_path) + error_messages
-    #     save_json(queue_path, queue_message)
+    # 6. store error messages to queue
+    queue_path = get_project_item_path(config['queue-message'])
+    if error_messages:
+        queue_message = load_json(queue_path) + error_messages
+        save_json(queue_path, queue_message)
 
-    # # 7. update tables
-    # update_table(config, extracted_messages, questions)
+    # 7. update tables
+    update_table(config, extracted_messages, questions)
 
-    # # 8. update api key
-    # update_env_variable(config['provider'])
+    # 8. update api key
+    update_env_variable(config['provider'])
     
 
 if __name__ == '__main__':
