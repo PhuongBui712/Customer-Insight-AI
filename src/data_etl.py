@@ -98,34 +98,51 @@ def update_conversation(page_schema: dict, new_check: int):
     for page_id, conversation_list in conversations.items():
         page_access_token = page_schema[page_id]['page_access_token']
         last_conversations = page_schema[page_id]['conversations']
+        page_last_check = page_schema[page_id]['last_check']
+
+        # update last check timestamp
+        page_schema[page_id]['last_check'] = new_check
         
+        # get the conversations that need to be scraped
         for con in conversation_list:
             con_id = con['id']
-            if con_id not in last_conversations:
-                # update `last_crawled_conversations`
-                last_conversations[con_id] = {
-                    'customer_id': con['customer_id'],
-                    'last_updated': con['updated_at'],
-                }
+            # if con_id not in last_conversations:
+            #     # update `last_crawled_conversations`
+            #     last_conversations[con_id] = {
+            #         'customer_id': con['customer_id'],
+            #         'last_updated': con['updated_at'],
+            #     }
 
-                # append to list to crawl data
-                update_conversations.append(
-                    # append page_id, page_access_token, conversation_id, customer_id, last_update
-                    (page_id, page_access_token, con_id, con['customer_id'], get_day_before(30))
-                )
+            #     # append to list to crawl data
+            #     update_conversations.append(
+            #         # append page_id, page_access_token, conversation_id, customer_id, last_update
+            #         (page_id, page_access_token, con_id, con['customer_id'], page_last_check)
+            #     )
 
-            elif con['updated_at'] != last_conversations[con_id]['last_updated']:
-                # update last crawl time
-                last_conversations[con_id]['last_updated'] = con['updated_at']
+            # elif con['updated_at'] != last_conversations[con_id]['last_updated']:
+            #     # update last crawl time
+            #     last_conversations[con_id]['last_updated'] = con['updated_at']
                 
-                # add to crawling list
-                last_update_timestamp = string_to_unix_second(con['updated_at'])
-                update_conversations.append(
-                    (page_id, page_access_token, con_id, con['customer_id'], last_update_timestamp)
-                )
+            #     # add to crawling list
+            #     last_update_timestamp = string_to_unix_second(con['updated_at'])
+            #     update_conversations.append(
+            #         (page_id, page_access_token, con_id, con['customer_id'], last_update_timestamp)
+            #     )
+            
+            # add to crawl list
+            last_update_timestamp = page_last_check if con_id not in last_conversations else string_to_unix_second(last_conversations[con_id]['updated_at'])
+            update_conversations.append(
+                # append page_id, page_access_token, conversation_id, customer_id, last_update
+                (page_id, page_access_token, con_id, con['customer_id'], last_update_timestamp)
+            )
+
+            # update `last_conversations`
+            last_conversations[con_id] = {
+                'customer_id': con['customer_id'],
+                'last_updated': con['updated_at'],
+            }
 
     return update_conversations
-
 
 def update_messages(conversations: dict, new_check: int):
     messages = []
@@ -229,9 +246,9 @@ def remove_old_data(config: dict):
         return
     
     # just remove data once per day
-    now = get_current_time_utc_plus_7()
-    if now.hour != 0 and now.minute > 30:
-        return
+    # now = get_current_time_utc_plus_7()
+    # if now.hour != 0 and now.minute > 30:
+    #     return
     
     date_bound = get_day_before(config['oldest-date'], return_type='date')
     
@@ -249,25 +266,25 @@ def remove_old_data(config: dict):
         save_json(get_project_item_path(config['queue-message']), queue_messsages)
     
     # remove data on sheet
-    for path, sheet_name in zip(
-        (get_project_item_path(config['message-table']), get_project_item_path(config['question-table'])),
-        (config['message-sheet'], config['question-sheet'])
-    ):
-        # remove
-        load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
-        name = "question"
-        if sheet_name == config['message-sheet']:
-            load_table_args.update({'list_cols': ['user', 'purpose']})
-            name = "message"
-        message_df = load_table(**load_table_args)
+    # for path, sheet_name in zip(
+    #     (get_project_item_path(config['message-table']), get_project_item_path(config['question-table'])),
+    #     (config['message-sheet'], config['question-sheet'])
+    # ):
+    #     # remove
+    #     load_table_args = {'path': path, 'datetime_cols': ['inserted_at']}
+    #     name = "question"
+    #     if sheet_name == config['message-sheet']:
+    #         load_table_args.update({'list_cols': ['user', 'purpose']})
+    #         name = "message"
+    #     message_df = load_table(**load_table_args)
         
-        print(f'Before removing old data, {name} table: {message_df.shape}')
-        message_df = message_df.loc[message_df['inserted_at'] > date_bound]
-        print(f'After removing old data, {name} table: {message_df.shape}')
+    #     print(f'Before removing old data, {name} table: {message_df.shape}')
+    #     message_df = message_df.loc[message_df['inserted_at'] > date_bound]
+    #     print(f'After removing old data, {name} table: {message_df.shape}')
 
-        # update
-        update_worksheet(message_df, sheet_name=sheet_name, mode='replace')
-        message_df.to_csv(path, index=False)
+    #     # update
+    #     update_worksheet(message_df, sheet_name=sheet_name, mode='replace')
+    #     message_df.to_csv(path, index=False)
 
 
 # task 3: update new data (pages, conversations, messages)
@@ -379,31 +396,29 @@ def analyse_customer_message_pipeline():
     messages = load_analyse_data(config, messages, config['num-sample'])
 
     # 5. analysing
-    important_keywords = config['product-keywords'] + config['important-message-keywords']
+    # important_keywords = config['product-keywords'] + config['important-message-keywords']
 
-    extracted_messages, questions, error_messages = analyse_message_pipeline(
-        messages,
-        remove_keywords=config['unimportant-message-keywords'],
-        filter_keywords=important_keywords,
-        question_keywords=config['question-keywords'],
-        template=config['template-message'],
-        important_score=config['important-score'],
-        provider=config['provider']
-    )
+    # extracted_messages, questions, error_messages = analyse_message_pipeline(
+    #     messages,
+    #     remove_keywords=config['unimportant-message-keywords'],
+    #     filter_keywords=important_keywords,
+    #     question_keywords=config['question-keywords'],
+    #     template=config['template-message'],
+    #     important_score=config['important-score'],
+    #     provider=config['provider']
+    # )
 
-    # 6. store error messages to queue
-    queue_path = get_project_item_path(config['queue-message'])
-    if error_messages:
-        queue_message = load_json(queue_path) + error_messages
-        save_json(queue_path, queue_message)
+    # # 6. store error messages to queue
+    # queue_path = get_project_item_path(config['queue-message'])
+    # if error_messages:
+    #     queue_message = load_json(queue_path) + error_messages
+    #     save_json(queue_path, queue_message)
 
-    # 7. update tables
-    update_table(config, extracted_messages, questions)
+    # # 7. update tables
+    # update_table(config, extracted_messages, questions)
 
-    # 8. update api key
-    update_env_variable(config['provider'])
-
-    # return extracted_messages, questions
+    # # 8. update api key
+    # update_env_variable(config['provider'])
     
 
 if __name__ == '__main__':
