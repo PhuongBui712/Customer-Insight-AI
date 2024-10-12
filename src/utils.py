@@ -124,29 +124,45 @@ def update_env_variable(provider: Literal['groq', 'google'] = 'groq'):
     # dotenv path
     dotenv_path = get_project_item_path(".env")
     
-    # key's names
+    # key's name pattern
     key = provider.upper() + "_API_KEY"
-    key1 = key + "1"
-    key2 = key + "2"
     
     # Read all the lines from the .env file
     with open(dotenv_path, 'r') as file:
         lines = file.readlines()
 
+    # Find the current value of the key
+    current_value = os.getenv(key)
+    
+    # Incremental check for keys (key1, key2, etc.)
+    idx = 1
+    while True:
+        next_key = f"{key}{idx}"
+        next_value = os.getenv(next_key)
+        
+        # If the next key doesn't exist, go back to key1
+        if next_value is None:
+            next_key = f"{key}1"
+            next_value = os.getenv(next_key)
+            break
+        elif current_value == next_value:
+            idx += 1
+        else:
+            break
+
     # Check if the key exists and update it
     with open(dotenv_path, 'w') as file:
         key_found = False
         for line in lines:
-            if line.startswith(key + '='):
-                new_value = os.getenv(key2) if os.getenv(key) == os.getenv(key1) else os.getenv(key1)
-                file.write(f'{key}={new_value}\n')
+            if line.startswith(f"{key}="):
+                file.write(f"{key}={next_value}\n")
                 key_found = True
             else:
                 file.write(line)
         
         # If the key wasn't found, add it at the end
         if not key_found:
-            file.write(f'{key}={new_value}\n')
+            file.write(f"{key}={next_value}\n")
 
     # Reload the environment variables
     load_dotenv(dotenv_path, override=True)
