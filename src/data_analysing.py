@@ -314,8 +314,6 @@ def extract_user_purpose_pipeline(
 
 
 def analyse_message_pipeline(messages: List[dict],
-                             remove_keywords: List[str] = None,
-                             filter_keywords: List[str] = None,
                              question_keywords: List[str] = None,
                              template: Optional[dict] = None,
                              important_score: Optional[float] = 0.7,
@@ -350,13 +348,6 @@ def analyse_message_pipeline(messages: List[dict],
     # Initialize results
     extracted_messages = []
     error_messages = []
-
-    # start processing
-    if remove_keywords:
-        messages = keyword_filter(remove_keywords, messages, get_keyword=False)
-
-    if filter_keywords:
-        messages = keyword_filter(filter_keywords, messages, get_keyword=True)
 
     template_messages = None
     if template is not None:
