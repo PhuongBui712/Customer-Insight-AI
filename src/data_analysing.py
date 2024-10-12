@@ -133,8 +133,10 @@ def call_llm(
 
                 for j, idx in enumerate(range(i, end_idx)):
                     res[idx] = next(iter(parsed_response[j].values()))
-            except Exception:
+            except Exception as exc:
                 print(f"Error while parsing LLM output for batch {i} - {end_idx - 1}")
+                print(exc)
+                print(response)
 
     return res
 
