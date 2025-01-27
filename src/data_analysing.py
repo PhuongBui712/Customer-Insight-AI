@@ -1,27 +1,28 @@
-import sys
 import re
-from tqdm import tqdm
-from threading import Lock
-from functools import lru_cache
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict
+from functools import lru_cache
+from threading import Lock
+from typing import Any, Dict, List, Optional
+
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from tqdm import tqdm
 
-from utils import *
-from prompt import (
-    classifying_inquiry_prompt,
-    reclassifying_inquiry_prompt,
-    extracting_user_purpose_prompt,
-    classifying_important_question_prompt,
-)
 from llm import *
-
+from prompt import (ImportantQuestions,  # prompt; output structure
+                    ScoredMessages, UserMessagesInfo,
+                    classifying_important_question_prompt,
+                    classifying_inquiry_prompt, extracting_user_purpose_prompt)
+from utils import *
 
 load_dotenv()
-LLM_CONFIG = load_yaml(os.path.join(PROJECT_DIRECTORY, 'config.yaml'))['llm']
+LLM_CONFIG = load_yaml(os.path.join(PROJECT_DIRECTORY, "config.yaml"))["llm"]
 
 
-def keyword_filter(patterns: List[str], messages: List[dict], get_keyword: Optional[bool] = True) -> List[dict]:
+def keyword_filter(
+    patterns: List[str], messages: List[dict], get_keyword: Optional[bool] = True
+) -> List[dict]:
     """
     Filter messages based on the presence or absence of specified keywords.
 
@@ -31,20 +32,25 @@ def keyword_filter(patterns: List[str], messages: List[dict], get_keyword: Optio
     Args:
         patterns (List[str]): A list of keywords to filter by.
         messages (List[dict]): A list of messages to filter.
-        get_keyword (Optional[bool], optional): If True, returns messages containing the keywords. 
+        get_keyword (Optional[bool], optional): If True, returns messages containing the keywords.
             If False, returns messages not containing the keywords. Defaults to True.
 
     Returns:
         List[dict]: A list of messages that meet the filtering criteria.
     """
-    synthetic_pattern = r'\b(' + '|'.join(patterns) + r')\b'
-    result = [m for m in messages 
-              if bool(re.search(synthetic_pattern, m['message'].lower())) == get_keyword]
+    synthetic_pattern = r"\b(" + "|".join(patterns) + r")\b"
+    result = [
+        m
+        for m in messages
+        if bool(re.search(synthetic_pattern, m["message"].lower())) == get_keyword
+    ]
 
     return result
 
 
-def handle_template_message(templates: Dict[str, Dict[str, str]], messages: List[dict]) -> Tuple[List[dict], List[dict]]:
+def handle_template_message(
+    templates: Dict[str, Dict[str, str]], messages: List[dict]
+) -> Tuple[List[dict], List[dict]]:
     """
     Handle template messages.
 
@@ -62,12 +68,20 @@ def handle_template_message(templates: Dict[str, Dict[str, str]], messages: List
             - `template_message`: A list of messages that were found in the `templates` dictionary.
             - `other_message`: A list of messages that were not found in the `templates` dictionary.
     """
+
+    def match_templates(s, templates: List[Dict[str, Any]]):
+        for template in templates:
+            pattern = re.compile(template["pattern"], re.IGNORECASE)
+            if pattern.search(s):
+                return {k: v for k, v in template.items() if k != "pattern"}
+        return {}
+
     template_message = []
     other_message = []
     for m in messages:
-        key = m['message'].lower()
-        if key in templates:
-            m.update(templates[key])
+        key = m["message"].lower()
+        if u_and_p := match_templates(key, templates):
+            m.update(u_and_p)
             template_message.append(m)
         else:
             other_message.append(m)
@@ -76,11 +90,12 @@ def handle_template_message(templates: Dict[str, Dict[str, str]], messages: List
 
 
 def call_llm(
-        messages: List[str], 
-        prompt: ChatPromptTemplate,
-        batch_size: int = 50,
-        provider: Literal['groq', 'google'] = 'groq',
-        desc: Optional[str] = None,
+    messages: List[str],
+    prompt: ChatPromptTemplate,
+    response_format: Optional[BaseModel] = None,
+    batch_size: int = 50,
+    provider: Literal["groq", "google", "snc"] = "groq",
+    desc: Optional[str] = None,
 ) -> List[Union[dict, bool, float, None]]:
     """
     Calls the specified LLM provider to generate responses for a list of messages.
@@ -92,7 +107,7 @@ def call_llm(
         messages (List[str]): A list of messages to be processed by the LLM.
         prompt (ChatPromptTemplate): A prompt template to be used for generating responses.
         batch_size (int, optional): The number of messages to process in each batch. Defaults to 50.
-        provider (Literal['groq', 'google'], optional): The LLM provider to use. Defaults to 'groq'.
+        provider (Literal['groq', 'google', 'snc'], optional): The LLM provider to use. Defaults to 'groq'.
         desc (Optional[str], optional): An optional description for the progress bar. Defaults to None.
 
     Returns:
@@ -100,39 +115,46 @@ def call_llm(
     """
     if provider == "google":
         chain = GoogleAICaller(LLM_CONFIG[provider], prompt)
-    else:
+    elif provider == "groq":
         chain = GroqAICaller(LLM_CONFIG[provider], prompt)
+    else:
+        chain = SambaNovaCloudAICaller(LLM_CONFIG[provider], prompt)
 
     @lru_cache(maxsize=None)
     def cached_invoke(input_str):
         return chain.invoke({"input": input_str})
-    
+
     res = [None for _ in range(len(messages))]
     with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         future = {
-            executor.submit(
-                lambda: cached_invoke(str(messages[i : i + batch_size]))
-            ): i
+            executor.submit(lambda: cached_invoke(str(messages[i : i + batch_size]))): i
             for i in range(0, len(messages), batch_size)
         }
-        for f in tqdm(as_completed(future), total=len(future), desc=(desc or 'Loading'), file=sys.stdout):
+        for f in tqdm(
+            as_completed(future),
+            total=len(future),
+            desc=(desc or "Loading"),
+            file=sys.stdout,
+        ):
             i = future[f]
             end_idx = min(i + batch_size, len(messages))
-            
+
             try:
                 response = f.result()
+                print(response)
             except Exception as exc:
                 print(f"Error while generating response for batch {i} - {end_idx - 1}")
                 continue
 
             try:
                 parsed_response = parse_llm_output(response)
+                print(parsed_response)
                 if len(parsed_response) != end_idx - i:
-                    print('Wrong size while query LLM, shutting down!')
+                    print("Wrong size while query LLM, shutting down!")
                     break
 
                 for j, idx in enumerate(range(i, end_idx)):
-                    res[idx] = next(iter(parsed_response[j].values()))
+                    res[idx] = parsed_response[j]
             except Exception as exc:
                 print(f"Error while parsing LLM output for batch {i} - {end_idx - 1}")
                 print(exc)
@@ -144,8 +166,9 @@ def call_llm(
 def classify_inquiry_pipeline(
     messages: List[dict],
     min_score: float,
+    response_format: BaseModel = ScoredMessages,
     batch_size: int = 50,
-    provider: Literal["google", "groq"] = "groq",
+    provider: Literal["google", "groq", "snc"] = "groq",
 ) -> Tuple[List[dict], List[dict]]:
     """
     Classifies inquiries based on a minimum score threshold.
@@ -157,7 +180,7 @@ def classify_inquiry_pipeline(
         messages (List[dict]): A list of messages to be classified.
         min_score (float): The minimum score threshold for classifying an inquiry.
         batch_size (int, optional): The number of messages to process in each batch. Defaults to 50.
-        provider (Literal["google", "groq"], optional): The LLM provider to use. Defaults to "groq".
+        provider (Literal["google", "groq", "snc"], optional): The LLM provider to use. Defaults to "groq".
 
     Returns:
         Tuple[List[dict], List[dict]]: A tuple containing two lists:
@@ -168,18 +191,19 @@ def classify_inquiry_pipeline(
     output = call_llm(
         messages=input,
         prompt=classifying_inquiry_prompt,
+        response_format=response_format,
         batch_size=batch_size,
         provider=provider,
-        desc='Classify inquiry'
+        desc="Classify inquiry",
     )
 
     classified_messages = []
     error_messages = []
-    for message, score in zip(messages, output):
-        if score and score >= min_score:
-            classified_messages.append(message)
-        else:
+    for message, scored_message in zip(messages, output):
+        if message["message"] != scored_message.get("message"):
             error_messages.append(message)
+        elif scored_message.get("score", 0.0) >= min_score:
+            classified_messages.append(message)
 
     return classified_messages, error_messages
 
@@ -187,7 +211,7 @@ def classify_inquiry_pipeline(
 def reclassify_inquiry_pipeline(
     messages: List[dict],
     batch_size: int = 50,
-    provider: Literal["google", "groq"] = "groq",
+    provider: Literal["google", "groq", "snc"] = "groq",
 ) -> Tuple[List[dict], List[dict]]:
     """
     Reclassifies inquiries using an LLM.
@@ -198,7 +222,7 @@ def reclassify_inquiry_pipeline(
     Args:
         messages (List[dict]): A list of messages to be reclassified.
         batch_size (int, optional): The number of messages to process in each batch. Defaults to 50.
-        provider (Literal["google", "groq"], optional): The LLM provider to use. Defaults to "groq".
+        provider (Literal["google", "groq", "snc"], optional): The LLM provider to use. Defaults to "groq".
 
     Returns:
         Tuple[List[dict], List[dict]]: A tuple containing two lists:
@@ -211,7 +235,7 @@ def reclassify_inquiry_pipeline(
         prompt=reclassifying_inquiry_prompt,
         batch_size=batch_size,
         provider=provider,
-        desc='Re-classify inquiry'
+        desc="Re-classify inquiry",
     )
 
     # get output to return
@@ -228,8 +252,9 @@ def reclassify_inquiry_pipeline(
 
 def classify_question_pipeline(
     messages: List[dict],
+    response_format: BaseModel = ImportantQuestions,
     batch_size: int = 50,
-    provider: Literal["google", "groq"] = "groq",
+    provider: Literal["google", "groq", "snc"] = "groq",
 ) -> Tuple[List[dict], List[dict]]:
     """
     Classifies messages as questions using an LLM.
@@ -240,7 +265,7 @@ def classify_question_pipeline(
     Args:
         messages (List[dict]): A list of messages to be classified.
         batch_size (int, optional): The number of messages to process in each batch. Defaults to 50.
-        provider (Literal["google", "groq"], optional): The LLM provider to use. Defaults to "groq".
+        provider (Literal["google", "groq", "snc"], optional): The LLM provider to use. Defaults to "groq".
 
     Returns:
         Tuple[List[dict], List[dict]]: A tuple containing two lists:
@@ -252,27 +277,29 @@ def classify_question_pipeline(
     output = call_llm(
         messages=input,
         prompt=classifying_important_question_prompt,
+        response_format=response_format,
         batch_size=batch_size,
         provider=provider,
-        desc='Classify question'
+        desc="Classify question",
     )
 
     # get output to return
     classified_messages = []
     error_messages = []
-    for message, label in zip(messages, output):
-        if label:
-            classified_messages.append(message)
-        else:
+    for message, labeled_message in zip(messages, output):
+        if message["message"] != labeled_message.get("message"):
             error_messages.append(message)
+        elif labeled_message.get("important") == True:
+            classified_messages.append(message)
 
     return classified_messages, error_messages
 
 
 def extract_user_purpose_pipeline(
-    messages: List, 
-    batch_size: int = 50, 
-    provider: Literal['google', 'groq'] = 'groq'
+    messages: List,
+    batch_size: int = 50,
+    response_format: BaseModel = UserMessagesInfo,
+    provider: Literal["google", "groq"] = "groq",
 ) -> Tuple[List[dict], List[dict]]:
     """
     Extracts user and purpose information from messages using an LLM.
@@ -295,30 +322,37 @@ def extract_user_purpose_pipeline(
     output = call_llm(
         messages=input,
         prompt=extracting_user_purpose_prompt,
+        response_format=response_format,
         batch_size=batch_size,
         provider=provider,
-        desc='Extract inquiry'
+        desc="Extract inquiry",
     )
 
     extracted_messages = []
     error_messages = []
     for mess, u_and_p in zip(messages, output):
-        if u_and_p and all(u_and_p.values()):
+        if (
+            u_and_p
+            and u_and_p.get("message") == mess.get("message")
+            and all(u_and_p.values())
+        ):
             extracted_message = mess.copy()
             extracted_message.update(u_and_p)
             extracted_messages.append(extracted_message)
         else:
             error_messages.append(mess)
-        
+
     return extracted_messages, error_messages
 
 
-def analyse_message_pipeline(messages: List[dict],
-                             question_keywords: List[str] = None,
-                             template: Optional[dict] = None,
-                             important_score: Optional[float] = 0.7,
-                             batch_size: int = 50,
-                             provider: Literal['google', 'groq'] = 'groq'):
+def analyse_message_pipeline(
+    messages: List[dict],
+    question_keywords: List[str] = None,
+    template: Optional[dict] = None,
+    important_score: Optional[float] = 0.7,
+    batch_size: int = 50,
+    provider: Literal["google", "groq"] = "google",
+):
     """
     Analyzes a list of messages using various LLM-based pipelines.
 
@@ -359,10 +393,14 @@ def analyse_message_pipeline(messages: List[dict],
     error_messages = messages[:-400]
 
     # extract user and purpose
-    classified_mess, error = classify_inquiry_pipeline(messages, important_score, batch_size, provider)
+    classified_mess, error = classify_inquiry_pipeline(
+        messages, min_score=important_score, batch_size=batch_size, provider=provider
+    )
     error_messages += error
 
-    extracted_mess, error = extract_user_purpose_pipeline(classified_mess, batch_size, provider)
+    extracted_mess, error = extract_user_purpose_pipeline(
+        classified_mess, batch_size=batch_size, provider=provider
+    )
     extracted_messages += extracted_mess
     error_messages += error
 
@@ -370,10 +408,34 @@ def analyse_message_pipeline(messages: List[dict],
     if question_keywords is not None:
         messages = keyword_filter(question_keywords, messages, get_keyword=True)
 
-    questions, error = classify_question_pipeline(messages, batch_size=batch_size, provider=provider)
+    questions, error = classify_question_pipeline(
+        messages, batch_size=batch_size, provider=provider
+    )
     error_messages += error
 
     # deduplicate error messages
-    error_messages = [json.loads(item) for item in {json.dumps(d, sort_keys=True) for d in error_messages}]
-    
+    error_messages = [
+        json.loads(item)
+        for item in {json.dumps(d, sort_keys=True) for d in error_messages}
+    ]
+
     return extracted_messages, questions, error_messages
+
+
+if __name__ == "__main__":
+    import json
+
+    config = load_yaml("config.yaml")
+    with open("data_v2/test_data.json", "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    # extracted_messages = analyse_message_pipeline(
+    extracted_messages, questions, error_messages = analyse_message_pipeline(
+        data,
+        question_keywords=config["question-keywords"],
+        template=config["template-message"],
+        important_score=config["important-score"],
+        provider=config["provider"],
+    )
+
+    print(questions)
