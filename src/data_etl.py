@@ -478,6 +478,8 @@ def analyse_customer_message_pipeline():
 
     # 4. load analyse messages
     messages = load_analyse_data(config, messages, config["num-sample"])
+    if not messages:
+        return
 
     # 5. analysing
     extracted_messages, questions, error_messages = analyse_message_pipeline(

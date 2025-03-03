@@ -1,5 +1,6 @@
 import re
 import sys
+from time import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from threading import Lock
@@ -398,11 +399,15 @@ def analyse_message_pipeline(
     )
     error_messages += error
 
+    time.sleep(60)
+
     extracted_mess, error = extract_user_purpose_pipeline(
         classified_mess, batch_size=batch_size, provider=provider
     )
     extracted_messages += extracted_mess
     error_messages += error
+
+    time.sleep(60)
 
     # classifiy important questions
     if question_keywords is not None:
