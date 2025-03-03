@@ -9,6 +9,7 @@ from langchain.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_community.chat_models.sambanova import ChatSambaNovaCloud
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
+from langchain_mistralai import ChatMistralAI
 from pydantic import BaseModel
 
 
@@ -297,6 +298,94 @@ class SambaNovaCloudAICaller(LLMCaller):
 
             result = chain.invoke(input)
 
+        if response_format is None:
+            return result.content
+        return result
+
+
+class MistralAICaller(LLMCaller):
+    """
+    A class to call the Mistral AI LLM.
+
+    This class inherits from LLMCaller and provides a wrapper for invoking the Mistral AI LLM.
+    It handles rate limiting and error handling, and provides a consistent interface for invoking the LLM.
+    """
+
+    def __init__(self, llm_config: dict, prompt: PromptTemplate):
+        """
+        Initialize the MistralAICaller object.
+
+        Args:
+            llm_config (dict): A dictionary containing the configuration for the Mistral AI LLM.
+            prompt (PromptTemplate): The prompt template to use for invoking the LLM.
+        """
+        super().__init__(max_request_per_minute=llm_config.get("max_request_per_minute", 15))
+
+        config = {"max_retries": 0}
+        config.update(llm_config)
+
+        self.llm = ChatMistralAI(**config)
+        self.prompt = prompt
+
+    def get_chain(self, response_format: Optional[BaseModel] = None):
+        if response_format is not None:
+            return self.prompt | self.llm.with_structured_output(response_format)
+
+        return self.prompt | self.llm
+
+    def _extract_error_code(self, exception: Exception) -> Optional[int]:
+        """
+        Extract the error code from an exception.
+
+        This method attempts to extract the error code from an exception raised during LLM invocation.
+        If the exception does not have a `status_code` attribute, it attempts to get a `code` attribute.
+        It returns None if neither attribute is found or if an error occurs during attribute access.
+
+        Args:
+            exception (Exception): The exception raised during LLM invocation.
+
+        Returns:
+            Optional[int]: The error code extracted from the exception, or None if no error code is found.
+        """
+        try:
+            # More general way to get error code
+            return exception.status_code
+        except AttributeError:
+            try:
+                return exception.code
+            except AttributeError:
+                return None
+        except Exception:
+            return None
+
+
+    def invoke(self, input: dict, response_format: Optional[BaseModel] = None) -> str:
+        """
+        Invoke the Mistral AI LLM with the given input.
+
+        This method increments the request counter, invokes the LLM with the given input, and handles potential errors.
+        If a 429 error (rate limit exceeded) is encountered, it waits until the next minute before retrying the request.
+        If any other error is encountered during the initial invocation, it logs the error and re-raises the exception.
+
+        Args:
+            input (dict): The input to provide to the LLM.
+            response_format (Optional[BaseModel]): The expected response format.
+
+        Returns:
+            str: The response from the LLM.
+        """
+        self._increment_counter(1)
+        chain = self.get_chain(response_format)
+        try:
+            result = chain.invoke(input)
+        except Exception as exc:
+            if self._extract_error_code(exc) == 429:
+                logging.info("Reaching maximum resources, wait to next minutes!")
+                self._wait_to_next_minute()
+                result = chain.invoke(input)
+            else:
+                logging.exception("An error occurred during LLM invocation.")  # Log the full traceback
+                raise
         if response_format is None:
             return result.content
         return result
